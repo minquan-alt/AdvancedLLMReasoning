@@ -43,7 +43,7 @@ class DataPreprocessing:
         solution = self.clean_text(solution)
         return f"### Question:\n{question}\n\n### Solution:\n{solution}"
     
-    def tokenize_data(self, text, max_length=1024):
+    def tokenize_data(self, text, max_length=512):
         '''
         Tokenize dữ liệu text
         Args:
@@ -83,7 +83,7 @@ class DataPreprocessing:
             self.dataset.select(test_indices)
         )
     
-    def process_example(self, example, max_length=1024):
+    def process_example(self, example, max_length=512):
         '''
         Xử lý một mẫu dữ liệu
         Args:
@@ -106,7 +106,7 @@ class DataPreprocessing:
         }
         return result
     
-    def preprocess(self, max_length=1024):
+    def preprocess(self, max_length=512):
         '''
         Tiền xử lý toàn bộ dataset
         Args:
