@@ -7,7 +7,7 @@ import re
 class DataPreprocessing:
     '''Tiền xử lý dữ liệu gồm làm sạch dữ liệu, tách dữ liệu ra train/dev/test, và tokenize dữ liệu'''
     
-    def __init__(self, dataset, tokenizer, train_ratio=0.8, dev_ratio=0.1):
+    def __init__(self, dataset, tokenizer, train_ratio=0.99, dev_ratio=0.005):
         '''
         Khởi tạo với dataset và tokenizer
         Args:
@@ -56,8 +56,8 @@ class DataPreprocessing:
             text,
             truncation=True,
             max_length=max_length,
-            padding='max_length',
-            return_tensors='pt'
+            padding=False,
+            return_tensors=None
         )
     
     def split_data(self):
@@ -100,9 +100,9 @@ class DataPreprocessing:
         
         # Thêm labels cho causal LM
         result = {
-            'input_ids': tokenized['input_ids'].squeeze(),
-            'attention_mask': tokenized['attention_mask'].squeeze(),
-            'labels': tokenized['input_ids'].squeeze().clone()
+            'input_ids': tokenized['input_ids'],
+            'attention_mask': tokenized['attention_mask'],
+            'labels': tokenized['input_ids'].copy()
         }
         return result
     
@@ -123,3 +123,31 @@ class DataPreprocessing:
         test_processed = test_data.map(lambda x: self.process_example(x, max_length))
         
         return train_processed, dev_processed, test_processed
+
+def process_and_save_data():
+    '''
+    Tiền xử lý dữ liệu từ dataset và lưu vào đĩa
+    Args:
+        dataset_path: Đường dẫn tới dataset Huggingface
+        tokenizer: Tokenizer từ transformers
+        output_path: Đường dẫn lưu dữ liệu đã xử lý
+        max_length: độ dài tối đa cho tokenize
+    '''
+    subset_ds = Dataset.load_from_disk("data/subset_openmathinstruct_1/256K")
+    
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B")
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        
+    processor = DataPreprocessing(subset_ds, tokenizer)
+    train_processed, dev_processed, test_processed = processor.preprocess(1024)
+    
+    output_path = 'data/processed_data/256K/'
+    train_processed.save_to_disk(output_path + 'train/')
+    dev_processed.save_to_disk(output_path + 'dev/')
+    test_processed.save_to_disk(output_path + 'test/')
+
+if __name__ == "__main__":
+    process_and_save_data()
