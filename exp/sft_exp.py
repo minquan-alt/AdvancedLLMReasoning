@@ -69,12 +69,12 @@ if __name__ == "__main__":
         output_dir="./output/sft_model",
         num_train_epochs=3,
         learning_rate=3e-5,
-        per_device_train_batch_size=4,  # Increased from 2
-        gradient_accumulation_steps=8,  # Reduced from 16 (same effective batch size)
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=8,
         warmup_steps=200,
         fp16=True,
-        optim="adamw_torch_fused",  # Faster optimizer
-        gradient_checkpointing=True,  # Enable gradient checkpointing
+        optim="adamw_torch_fused", 
+        gradient_checkpointing=True,
 
         eval_strategy="steps",
         eval_steps=500,
