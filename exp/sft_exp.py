@@ -121,11 +121,13 @@ trainer = Trainer(
     data_collator=data_collator,
 )
 
-print("Bắt đầu training...")
-train_result = trainer.train()
-metrics = train_result.metrics
-print(f"Training xong! Tổng thời gian: {metrics['train_runtime']} giây ({metrics['train_runtime']/3600:.2f} giờ)")
-trainer.save_metrics("train", metrics)
-trainer.save_state()
+# print("Bắt đầu training...")
+# train_result = trainer.train()
+# metrics = train_result.metrics
+# print(f"Training xong! Tổng thời gian: {metrics['train_runtime']} giây ({metrics['train_runtime']/3600:.2f} giờ)")
+# trainer.save_metrics("train", metrics)
+# trainer.save_state()
+
+train_result = trainer.train(resume_from_checkpoint=True)
 
 print(f"Log đã được lưu tại: {training_args.output_dir}")
