@@ -114,10 +114,8 @@ class DataPreprocessing:
         Returns:
             tuple (train_data, dev_data, test_data) đã được tiền xử lý
         '''
-        # Chia dữ liệu
         train_data, dev_data, test_data = self.split_data()
         
-        # Áp dụng xử lý cho từng tập
         train_processed = train_data.map(lambda x: self.process_example(x, max_length))
         dev_processed = dev_data.map(lambda x: self.process_example(x, max_length))
         test_processed = test_data.map(lambda x: self.process_example(x, max_length))
@@ -142,9 +140,9 @@ def process_and_save_data():
         tokenizer.pad_token = tokenizer.eos_token
         
     processor = DataPreprocessing(subset_ds, tokenizer)
-    train_processed, dev_processed, test_processed = processor.preprocess(1024)
+    train_processed, dev_processed, test_processed = processor.preprocess(max_length=1024)
     
-    output_path = 'data/processed_data/256K/'
+    output_path = 'data/processed_data_v0/256K/'
     train_processed.save_to_disk(output_path + 'train/')
     dev_processed.save_to_disk(output_path + 'dev/')
     test_processed.save_to_disk(output_path + 'test/')
