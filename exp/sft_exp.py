@@ -12,15 +12,20 @@ HF_AUTH_TOKEN = os.getenv('HF_AUTH_TOKEN')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SFT Training for Math Model")
-    parser.add_argument("--data_path", type=int, required=True, help="0: data with procesed_data_v0, 1: data with processed_data_v1")
+    
+    parser.add_argument("--data_path", type=int, required=True,
+                        help="0: v0 (Plain), 1: v1 (Text CoT), 2: v2 (Hybrid/Agentic)")
     args = parser.parse_args()
     
+    # --- CẬP NHẬT LOGIC ĐƯỜNG DẪN DATA ---
     if args.data_path == 0:
         data_path = 'data/processed_data_v0/256K/'
     elif args.data_path == 1:
         data_path = 'data/processed_data_v1/256K/'
+    elif args.data_path == 2:
+        data_path = 'data/processed_data_v2/256K/'
     else:
-        raise ValueError("data_path phải là 0 hoặc 1")
+        raise ValueError("data_path phải là 0, 1 hoặc 2")
         
     train_processed = Dataset.load_from_disk(data_path + 'train/')
     dev_processed = Dataset.load_from_disk(data_path + 'dev/')
@@ -127,8 +132,8 @@ if __name__ == "__main__":
     metrics = train_result.metrics
     print(f"Training xong! Tổng thời gian: {metrics['train_runtime']} giây ({metrics['train_runtime']/3600:.2f} giờ)")
     
-    trainer.save_model(f"math_tutor_model/math_sft_adapter/final_checkpoint/v{args.data_path}")
-    tokenizer.save_pretrained(f"math_tutor_model/math_sft_adapter/final_checkpoint/v{args.data_path}")
+    trainer.save_model(f"math_tutor_model/math_sft_adapter/v{args.data_path}/final_checkpoint")
+    tokenizer.save_pretrained(f"math_tutor_model/math_sft_adapter/v{args.data_path}/final_checkpoint")
     trainer.save_metrics("train", metrics)
     trainer.save_state()
 
