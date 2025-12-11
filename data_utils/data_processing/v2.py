@@ -47,13 +47,14 @@ class DataPreprocessing:
     def process_example(self, example, max_length=1024):
         '''
         Xử lý từng mẫu: Masking (Question + Instruction), giữ lại Solution.
+        KHÔNG Padding tại đây (để DataCollator lo).
+        Thêm Instruction để định hướng mô hình.
         '''
         eos_id = self.tokenizer.eos_token_id
         
         q_raw = example['question']
         a_raw = example['generated_solution']
         
-        # Thêm Instruction để định hướng model
         instruction = (
             "Solve the problem step by step. You can use Python code if needed.\n"
             "If you write code, wrap it inside <llm-code> ... </llm-code>.\n"

@@ -41,7 +41,7 @@ class DataPreprocessing:
         '''
         question = self.clean_text(question)
         solution = self.clean_text(solution)
-        return f"### Question:\n{question}\n\n### Solution:\n{solution}{self.tokenizer.eos_token}"
+        return f"### Question:\n{question}\n\n### Solution:\n{solution}"
     
     def tokenize_data(self, text, max_length=512):
         '''

@@ -6,7 +6,10 @@ import re
 from transformers import AutoTokenizer
 
 class DataPreprocessing:
-    '''Tiền xử lý dữ liệu: Tokenize thủ công, Masking, Truncation (No Padding)'''
+    '''Tiền xử lý dữ liệu: 
+    Tokenize thủ công, 
+    Masking, 
+    Truncation (No Padding)'''
     def __init__(self, dataset, tokenizer, train_ratio=0.99, dev_ratio=0.005):
         self.dataset = dataset
         self.tokenizer = tokenizer
@@ -43,6 +46,7 @@ class DataPreprocessing:
         '''
         Xử lý từng mẫu: Masking Question, giữ lại Solution, Truncation thủ công.
         KHÔNG Padding tại đây (để DataCollator lo).
+        KHÔNG đưa Instruction vào.
         '''
         eos_id = self.tokenizer.eos_token_id
         
