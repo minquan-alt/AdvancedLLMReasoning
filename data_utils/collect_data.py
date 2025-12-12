@@ -33,6 +33,10 @@ def get_any_code_filtering_subset(ds, q2indices, target, seed=42):
         code_indices = []
         text_indices = []
         for i in indices:
+            # Chỉ lấy sample đúng
+            if not ds[i].get('is_correct', False):
+                continue
+                
             em = ds[i].get('error_message')
             code_used = (em != '<not_executed>')
             if code_used:
@@ -53,7 +57,7 @@ def save_subset(ds, ds_indices):
     subset_data = [{"question": ex["question"], "generated_solution": ex["generated_solution"]} for ex in subset_data]
 
     subset_ds = Dataset.from_list(subset_data)
-    subset_ds.save_to_disk("data/subset_openmathinstruct_1")
+    subset_ds.save_to_disk("data/subset_openmathinstruct_1_v2")
     return subset_ds
 
 def get_subset_dataset(target_gsm8k=10000, target_math=10000, seed=42, save_to_disk=True):
@@ -66,6 +70,10 @@ def get_subset_dataset(target_gsm8k=10000, target_math=10000, seed=42, save_to_d
     groups = {'gsm8k': defaultdict(list), 'math': defaultdict(list)}
     
     for i, ex in enumerate(tqdm(ds, desc='Iterating dataset')):
+        # Chỉ xét các sample có is_correct == True
+        if not ex.get('is_correct', False):
+            continue
+            
         dataset_name = ex.get('dataset')
         if dataset_name in ('gsm8k', 'math'):
             q = ex.get('question')

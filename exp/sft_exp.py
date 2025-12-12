@@ -1,10 +1,25 @@
-import argparse
-import os
+import argparse, os, subprocess, time
 from dotenv import load_dotenv
 from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments, DataCollatorForSeq2Seq
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import torch
+
+def stats():
+    u = int(subprocess.check_output("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", shell=True))
+    used = int(subprocess.check_output("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits", shell=True))
+    total = int(subprocess.check_output("nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits", shell=True))
+    return u, used, total
+
+while True:
+    u, used, total = stats()
+    free = total - used
+    print(f"util={u}%, free={free}MB")
+    if u < 10 and free >= 20000:
+        break
+    time.sleep(10)
+
+print("start")
 
 load_dotenv()
 HF_AUTH_TOKEN = os.getenv('HF_AUTH_TOKEN')
@@ -14,7 +29,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SFT Training for Math Model")
     
     parser.add_argument("--data_path", type=int, required=True,
-                        help="0: v0 (Plain), 1: v1 (Text CoT), 2: v2 (Hybrid/Agentic)")
+                        help="0: v0, 1: v1, 2: v2, 3: v3")
     args = parser.parse_args()
     
     # --- CẬP NHẬT LOGIC ĐƯỜNG DẪN DATA ---
@@ -24,8 +39,10 @@ if __name__ == "__main__":
         data_path = 'data/processed_data_v1/256K/'
     elif args.data_path == 2:
         data_path = 'data/processed_data_v2/256K/'
+    elif args.data_path == 3:
+        data_path = 'data/processed_data_v3/256K/'
     else:
-        raise ValueError("data_path phải là 0, 1 hoặc 2")
+        raise ValueError("data_path phải là 0, 1, 2 hoặc 3")
         
     train_processed = Dataset.load_from_disk(data_path + 'train/')
     dev_processed = Dataset.load_from_disk(data_path + 'dev/')

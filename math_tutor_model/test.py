@@ -6,16 +6,7 @@ from tqdm import tqdm
 import re
 import argparse
 import json
-import os
-import sympy
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
-import signal
-import io
-import contextlib
-
-def handler(signum, frame):
-    raise TimeoutError
-signal.signal(signal.SIGALRM, handler)
 
 BASE_MODEL_ID = "meta-llama/Llama-3.2-1B"
 
@@ -46,29 +37,6 @@ def load_model(model_id="sft", data_path=1):
     model.eval()
     return model, tokenizer
 
-# --- THÊM MỚI: Hàm trích xuất Code ---
-def extract_code(text):
-    pattern = r"<llm-code>(.*?)</llm-code>"
-    match = re.search(pattern, text, re.DOTALL)
-    if match:
-        return match.group(1)
-    return None
-
-# --- THÊM MỚI: Hàm thực thi Code ---
-def execute_python_code(code):
-    output_buffer = io.StringIO()
-    try:
-        # Timeout 2 giây cho code python (tránh loop vô tận)
-        signal.alarm(2)
-        with contextlib.redirect_stdout(output_buffer):
-            local_env = {}
-            exec(code, {}, local_env)
-        signal.alarm(0)
-        return output_buffer.getvalue().strip()
-    except Exception:
-        signal.alarm(0)
-        return None
-
 def extract_answer(text):
     if "\\boxed{" in text:
         idx = text.rfind("\\boxed{")
@@ -92,30 +60,6 @@ def extract_answer(text):
         return match.group(1)
         
     return None
-
-def math_equal(pred, gold):
-    if pred is None or gold is None: return False
-
-    def clean(t): 
-        return str(t).replace(",", "").replace("$", "").strip()
-    
-    pred, gold = clean(pred), clean(gold)
-    if pred == gold: return True
-
-    try:
-        transformations = (standard_transformations + (implicit_multiplication_application,))
-        signal.alarm(2)
-        diff = sympy.simplify(parse_expr(pred, transformations=transformations) - 
-                              parse_expr(gold, transformations=transformations))
-        signal.alarm(0)
-        if diff == 0: return True
-    except:
-        signal.alarm(0)
-    
-    try:
-        return abs(float(pred) - float(gold)) < 1e-6
-    except:
-        return False
 
 def create_prompt(question):
     return (
@@ -149,13 +93,12 @@ def evaluate(model_id=None, dataset_name="gsm8k", data_path=1, num_samples=-1):
     print(f"Dataset: {dataset_name} | Samples: {len(ds)}")
     print(f"{'='*60}")
 
-    correct = 0
-    total = 0
     results = []
     terminators = [tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|eot_id|>")]
 
     for item in tqdm(ds, desc="Evaluating"):
         question = item['question'] if dataset_name == 'gsm8k' else item['problem']
+        print(f"question: {question}")
         ground_truth = get_truth(item)
         
         prompt = create_prompt(question)
@@ -172,42 +115,17 @@ def evaluate(model_id=None, dataset_name="gsm8k", data_path=1, num_samples=-1):
             )
         
         full_res = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        gen_res = full_res.split("### Solution:\n")[-1] if "### Solution:\n" in full_res else full_res
-
-        code = extract_code(gen_res)
-        model_ans = None
-        used_code = False
-
-        if code:
-            exec_result = execute_python_code(code)
-            if exec_result:
-                model_ans = exec_result
-                used_code = True
-        
-        if model_ans is None:
-            model_ans = extract_answer(gen_res)
-
-        is_correct = math_equal(model_ans, ground_truth)
-
-        if is_correct: 
-            correct += 1
-        total += 1
+        print(f"full response: {full_res}")
 
         results.append({
             "question": question,
             "full_response": full_res,
-            "final_response": model_ans,
             "truth": ground_truth,
-            "is_correct": is_correct,
-            "used_code_exec": used_code
         })
 
-    acc = correct / total
-    print(f"\nFINAL RESULT: {acc:.2%} ({correct}/{total})")
-    
     if output_file:
         with open(output_file, "w") as f:
-            json.dump({"accuracy": acc, "details": results}, f, indent=2)
+            json.dump({"details": results}, f, indent=2)
         print(f"Saved details to {output_file}")
 
 if __name__ == "__main__":

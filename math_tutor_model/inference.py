@@ -32,11 +32,13 @@ def load_model():
     return model, tokenizer
 
 def solve_math_problem(model, tokenizer, question):
+    
     prompt = (
         f"### Question:\n{question}\n\n"
         "### Instruction:\n"
-        "Let's think step by step. You can use Python code if needed. "
-        "At the end, output the final answer inside \\boxed{}.\n\n"
+        "Solve the problem step by step. You can use Python code if needed.\n"
+        "If you write code, wrap it inside <llm-code> ... </llm-code>.\n"
+        "Output ONLY the final number inside \\boxed{}.\n\n"
         "### Solution:\n"
     )
     
