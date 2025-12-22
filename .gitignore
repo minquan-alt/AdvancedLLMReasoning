@@ -16,3 +16,5 @@ output/
 .vscode/
 .ipynb_checkpoints/
 .DS_Store
+
+checkpoints/
