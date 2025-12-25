@@ -37,6 +37,7 @@ for i, ex in enumerate(tqdm(ds, desc='Iterating dataset')):
 del ds
 gc.collect()
 print(f"Loaded {len(unique_questions)} unique questions")
+len_questions = len(unique_questions)
 
 # ============= Helper Functions =============
 def parse_solution_into_steps(solution):
@@ -89,22 +90,24 @@ def save_checkpoint(prm_dataset, total_steps, total_questions, checkpoint_num):
     return []
 
 def load_latest_checkpoint():
-    """Load metadata from latest checkpoint"""
+    """Load metadata from latest checkpoint and return processed questions"""
     checkpoint_dir = "checkpoints"
     if not os.path.exists(checkpoint_dir):
-        return 0, 0, 0
+        return 0, 0, 0, set()
     
     checkpoints = [f for f in os.listdir(checkpoint_dir) if f.startswith("prm_dataset_checkpoint_")]
     if not checkpoints:
-        return 0, 0, 0
+        return 0, 0, 0, set()
     
     # Get latest checkpoint number
     checkpoint_nums = [int(f.split('_')[-1].split('.')[0]) for f in checkpoints]
     latest_num = max(checkpoint_nums)
     
     # Count total steps and questions từ tất cả checkpoints
+    # Và collect tất cả questions đã xử lý
     total_steps = 0
     total_questions = 0
+    processed_questions = set()
     
     for num in sorted(checkpoint_nums):
         checkpoint_path = os.path.join(checkpoint_dir, f"prm_dataset_checkpoint_{num}.json")
@@ -113,13 +116,15 @@ def load_latest_checkpoint():
             total_questions += len(data)
             for item in data:
                 total_steps += len(item['solution_steps'])
+                processed_questions.add(item['question'])
     
     print(f"Resuming from checkpoint {latest_num}: {total_questions} questions, {total_steps} steps")
-    return total_steps, total_questions, latest_num
+    print(f"Skipping {len(processed_questions)} already processed questions")
+    return total_steps, total_questions, latest_num, processed_questions
 
 # ============= Load Model =============
 print("Loading model...")
-ADAPTER_PATH = "/home/guest/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v2/final_checkpoint" 
+ADAPTER_PATH = "/home/quang_ai/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v2/final_checkpoint" 
 BASE_MODEL_ID = "meta-llama/Llama-3.2-1B"
 
 bnb_config = BitsAndBytesConfig(
@@ -161,7 +166,7 @@ BATCH_SIZE = 64
 CHECKPOINT_INTERVAL = 5000  # Save mỗi 5000 steps
 
 # Load checkpoint nếu có
-total_steps, total_questions, checkpoint_num = load_latest_checkpoint()
+total_steps, total_questions, checkpoint_num, processed_questions = load_latest_checkpoint()
 
 # prm_dataset chỉ lưu tạm, sẽ flush mỗi checkpoint
 prm_dataset = []
@@ -177,7 +182,17 @@ print(f"Batch size: {BATCH_SIZE}, Checkpoint every {CHECKPOINT_INTERVAL} steps\n
 with tqdm(total=TARGET_SIZE, initial=total_steps, desc="Steps collected") as pbar:
     while total_steps < TARGET_SIZE:
         # Thu thập batch
-        while len(batch_prompts) < BATCH_SIZE:
+        attempts = 0
+        max_attempts = len_questions * 2  # Giới hạn số lần thử để tránh vòng lặp vô hạn
+        
+        while len(batch_prompts) < BATCH_SIZE and attempts < max_attempts:
+            attempts += 1
+            
+            # Check nếu hết data
+            if not s_deque['gsm8k'] and not s_deque['math']:
+                print("\nRan out of data in queues!")
+                break
+            
             g = g_cycle.popleft()
             g_cycle.append(g)
 
@@ -188,6 +203,10 @@ with tqdm(total=TARGET_SIZE, initial=total_steps, desc="Steps collected") as pba
             question = s['question']
             answer = s['answer']
             
+            # Skip nếu question đã được xử lý trong checkpoint trước
+            if question in processed_questions:
+                continue
+            
             prompt = (
                 f"### Question:\n{clean_text(question)}\n\n"
                 f"### Instruction:\n{instruction}\n\n"
@@ -197,6 +216,11 @@ with tqdm(total=TARGET_SIZE, initial=total_steps, desc="Steps collected") as pba
             batch_prompts.append(prompt)
             batch_questions.append(question)
             batch_answers.append(answer)
+        
+        # Nếu không thu thập được batch đủ lớn, break
+        if len(batch_prompts) == 0:
+            print("\nNo more unprocessed questions available!")
+            break
         
         # Wrap generation trong try-except để handle OOM
         try:
