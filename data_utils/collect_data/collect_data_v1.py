@@ -57,7 +57,7 @@ def save_subset(ds, ds_indices):
     subset_data = [{"question": ex["question"], "generated_solution": ex["generated_solution"]} for ex in subset_data]
 
     subset_ds = Dataset.from_list(subset_data)
-    subset_ds.save_to_disk("data/subset_openmathinstruct_1_v2")
+    subset_ds.save_to_disk("data/subset_openmathinstruct_1_v1")
     return subset_ds
 
 def get_subset_dataset(target_gsm8k=10000, target_math=10000, seed=42, save_to_disk=True):
@@ -69,11 +69,7 @@ def get_subset_dataset(target_gsm8k=10000, target_math=10000, seed=42, save_to_d
     print("Grouping examples by dataset and question...")
     groups = {'gsm8k': defaultdict(list), 'math': defaultdict(list)}
     
-    for i, ex in enumerate(tqdm(ds, desc='Iterating dataset')):
-        # Chỉ xét các sample có is_correct == True
-        if not ex.get('is_correct', False):
-            continue
-            
+    for i, ex in enumerate(tqdm(ds, desc='Iterating dataset')):   
         dataset_name = ex.get('dataset')
         if dataset_name in ('gsm8k', 'math'):
             q = ex.get('question')
@@ -115,13 +111,7 @@ if __name__ == "__main__":
     
     print("\n" + "=" * 60)
     print(f"Successfully created subset dataset")
-    print(f"Total samples: {len(subset_ds)}")
-    
-    import sys
-    memory_bytes = sum(sys.getsizeof(str(subset_ds[i])) for i in range(len(subset_ds)))
-    memory_gb = memory_bytes / (1024**3)
-    print(f"Approximate memory size: {memory_gb:.4f} GB")
-    
+    print(f"Total samples: {len(subset_ds)}")  
     print(f"\nFirst sample:")
     print(f"Question: {subset_ds[0]['question'][:100]}...")
     print(f"Solution: {subset_ds[0]['generated_solution'][:100]}...")

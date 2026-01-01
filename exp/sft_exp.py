@@ -56,7 +56,7 @@ if __name__ == "__main__":
 
     base_model = "meta-llama/Llama-3.2-1B"
     tokenizer = AutoTokenizer.from_pretrained(base_model)
-    tokenizer.pad_token = tokenizer.eos_token
+    # tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     model = AutoModelForCausalLM.from_pretrained(
