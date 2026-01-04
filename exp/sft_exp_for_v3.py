@@ -4,24 +4,25 @@ from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments, DataCollatorForSeq2Seq
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import torch
+from huggingface_hub import login
 
 load_dotenv()
 HF_AUTH_TOKEN = os.getenv('HF_AUTH_TOKEN')
-# login(HF_AUTH_TOKEN)
+login(HF_AUTH_TOKEN)
 
-def stats():
-    u = int(subprocess.check_output("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", shell=True))
-    used = int(subprocess.check_output("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits", shell=True))
-    total = int(subprocess.check_output("nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits", shell=True))
-    return u, used, total
+# def stats():
+#     u = int(subprocess.check_output("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", shell=True))
+#     used = int(subprocess.check_output("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits", shell=True))
+#     total = int(subprocess.check_output("nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits", shell=True))
+#     return u, used, total
 
-while True:
-    u, used, total = stats()
-    free = total - used
-    print(f"util={u}%, free={free}MB")
-    if u < 10 and free >= 20000:
-        break
-    time.sleep(10)
+# while True:
+#     u, used, total = stats()
+#     free = total - used
+#     print(f"util={u}%, free={free}MB")
+#     if u < 10 and free >= 20000:
+#         break
+#     time.sleep(10)
 
 print("start")
 
