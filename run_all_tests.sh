@@ -8,14 +8,14 @@ echo "=========================================="
 echo "Running all model evaluations"
 echo "=========================================="
 
-echo -e "\n[1/10] Testing v3 on GSM8K..."
-python -m math_tutor_model.test --data gsm8k --model sft --data_path 3
+# echo -e "\n[1/10] Testing v3 on GSM8K..."
+# python -m math_tutor_model.test --data gsm8k --model sft --data_path 3
 
-echo -e "\n[2/10] Testing v3 on MATH..."
-python -m math_tutor_model.test --data math --model sft --data_path 3
+# echo -e "\n[2/10] Testing v3 on MATH..."
+# python -m math_tutor_model.test --data math --model sft --data_path 3
 
-echo -e "\n[3/10] Testing v2 on GSM8K..."
-python -m math_tutor_model.test --data gsm8k --model sft --data_path 2
+# echo -e "\n[3/10] Testing v2 on GSM8K..."
+# python -m math_tutor_model.test --data gsm8k --model sft --data_path 2
 
 echo -e "\n[4/10] Testing v2 on MATH..."
 python -m math_tutor_model.test --data math --model sft --data_path 2

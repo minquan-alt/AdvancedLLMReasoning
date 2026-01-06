@@ -96,3 +96,16 @@ Cách giải quyết:
 - Remove commas trong numbers (276,000 → 276000)
 - Normalize I vs i (complex numbers)
 
+
+
+      "question": "Let $f(x)$ be an odd function, and let $g(x)$ be an even function.  Is $f(f(g(f(g(f(x))))))$ even, odd, or neither?\n\nEnter \"odd\", \"even\", or \"neither\".",
+      "generated_solution": "Let's write a function that takes in an odd function $f$ and an even function $g$ and returns $f(f(g(f(g(f(x))))))$.\n```python\ndef f(x):\n return -x\n\ndef g(x):\n return x\n\ndef f_of_f_of_f_of_f(x):\n return f(f(g(f(g(f(x))))))\n\nprint(f_of_f_of_f_of_f(1))\n```\n<llm>\n1\n</llm>\nSo $f(f(g(f(g(f(x))))))$ is \\boxed{even}.",
+      "predicted_answer": "even",
+      "truth": "\\text{even}",
+      "correct": false
+
+      "question": "Convert the point $(0,3)$ in rectangular coordinates to polar coordinates.  Enter your answer in the form $(r,\\theta),$ where $r > 0$ and $0 \\le \\theta < 2 \\pi.$",
+      "generated_solution": "To convert from rectangular to polar coordinates, we need to find the distance from the origin to the point $(0,3)$ and then use the formula $r = \\sqrt{x^2 + y^2}$ and $\\theta = \\arctan{\\frac{y}{x}}$.\n```python\nimport math\n\n# Convert the point to polar coordinates\nx = 0\ny = 3\nr = math.sqrt(x**2 + y**2)\ntheta = math.atan2(y, x)\n\n# Print the result\nprint(f\"r = {r}, theta = {theta}\")\n```\n<llm>\nr = 3.0, theta = 1.5707963267948966\n</llm>\nSo the polar coordinates are $\\boxed{(3, \\pi/2)}$.",
+      "predicted_answer": "(3, \\pi/2)",
+      "truth": "\\left( 3, \\frac{\\pi}{2} \\right)",
+      "correct": false

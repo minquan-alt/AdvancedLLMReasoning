@@ -10,6 +10,7 @@ import sys
 from io import StringIO
 from math_tutor_model.math_equivalence import is_equiv
 from utils.prompt import PROMPT_V0, PROMPT_V1, PROMPT_V2, SYSTEM_PROMPT_V3
+from utils.inference_utils import execute_python_code, solve_math_problem
 
 BASE_MODEL_ID = "meta-llama/Llama-3.2-1B"
 
@@ -39,10 +40,6 @@ def load_model(model_id="sft", data_path=1):
     tokenizer.padding_side = "left"
     if data_path < 3:
         tokenizer.pad_token = tokenizer.eos_token
-    
-    if ADAPTER_PATH is None:
-        model.eval()
-        return model, tokenizer
     
     try:
         model = PeftModel.from_pretrained(base_model, ADAPTER_PATH)
@@ -119,40 +116,11 @@ def post_process_solution_v0_v1_v2(generated_text):
     
     return trimmed_text
 
-def post_process_solution_v3(generated_text):
+def solve_math_problem_v3(model, tokenizer, question, max_length=512):
     """
-    Post-process solution for v3 format (using ```python code blocks):
-    1. Trim to line containing \\boxed{...}
-    2. If code is present, execute it and replace result in boxed
+    New iterative inference for v3 format with inline code execution.
     """
-    match = re.search(r'^.*\\boxed\{[^}]+\}.*$', generated_text, re.MULTILINE)
-    if match:
-        trimmed_text = generated_text[:match.end()]
-    else:
-        trimmed_text = generated_text
-    
-    # Check for Python code in ```python blocks
-    code_match = re.search(r'```python\s*\n(.*?)\n```', trimmed_text, re.DOTALL)
-    
-    if code_match:
-        code_str = code_match.group(1)
-        
-        # Remove output tags
-        trimmed_text = re.sub(r'<llm>.*?</llm>', '', trimmed_text, flags=re.DOTALL)
-        trimmed_text = re.sub(r'<llm-code-output>.*?</llm-code-output>', '', trimmed_text, flags=re.DOTALL)
-        
-        # Execute code
-        result = execute_python_code(code_str)
-        
-        # Only replace if execution was successful
-        if result:
-            boxed_match = re.search(r'\\boxed\{([^}]+)\}', trimmed_text)
-            if boxed_match:
-                trimmed_text = re.sub(r'\\boxed\{[^}]+\}', f'\\\\boxed{{{result}}}', trimmed_text)
-            else:
-                trimmed_text += f'\n\nTherefore, the answer is \\boxed{{{result}}}.'
-    
-    return trimmed_text
+    return solve_math_problem(model, tokenizer, question, SYSTEM_PROMPT_V3, max_length)
 
 def extract_answer(text):
     if "\\boxed{" in text:
@@ -208,37 +176,31 @@ def evaluate(model_id=None, dataset_name="gsm8k", data_path=1, num_samples=-1):
         question = item['question'] if dataset_name == 'gsm8k' else item['problem']
         ground_truth = get_truth(item)
         
-        # chọn prompt theo data_path
+        # chọn inference theo data_path
         if data_path >= 3:
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT_V3},
-                {"role": "user", "content": question},
-            ]
-            prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            # sử dụng inference mới cho v3
+            processed_solution = solve_math_problem_v3(model, tokenizer, question, max_length=512)
         else:
+            # sử dụng inference cũ cho v0/v1/v2
             if data_path == 0:
                 prompt = PROMPT_V0.format(question=question)
             elif data_path == 1:
                 prompt = PROMPT_V1.format(question=question)
             else:  # data_path == 2
                 prompt = PROMPT_V2.format(question=question)
-        
-        inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to("cuda")
+            
+            inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to("cuda")
 
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=512,
-                do_sample=False,
-                eos_token_id=terminators if data_path < 3 else tokenizer.convert_tokens_to_ids("<|eot_id|>"),
-                pad_token_id=tokenizer.pad_token_id
-            )
-        
-        generated_text = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-        
-        if data_path >= 3:
-            processed_solution = post_process_solution_v3(generated_text)
-        else:
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=512,
+                    do_sample=False,
+                    eos_token_id=terminators,
+                    pad_token_id=tokenizer.pad_token_id
+                )
+            
+            generated_text = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
             processed_solution = post_process_solution_v0_v1_v2(generated_text)
         
         # trích xuất đáp án và so sánh

@@ -1,0 +1,112 @@
+{
+  "total_steps": 34,
+  "gsm8k_steps": 12,
+  "math_steps": 22,
+  "total_questions": 10,
+  "dataset": [
+    {
+      "question": "Martha has 18 crayons. She lost half of them, so she bought a new set of 20 crayons. How many crayons in total does Martha have after the purchase?",
+      "expected_answer": "29",
+      "solution_steps": [
+        "Let's solve this problem using Python code.",
+        "```python\ncrayons_before = 18\ncrayons_lost = crayons_before / 2\ncrayons_after = crayons_lost + 20\ncrayons_after\n```\n<llm>\n29.0\n</llm>",
+        "Thus Martha has \\boxed{29} crayons in total."
+      ],
+      "dataset": "gsm8k"
+    },
+    {
+      "question": "In a rectangular coordinate system, what is the number of units in the distance from the origin to the point $(-15, 8)$?",
+      "expected_answer": "17",
+      "solution_steps": [
+        "We can use the distance formula to calculate the distance between the origin and the point $(-15, 8)$.",
+        "```python\nfrom sympy import sqrt\n\n# Define the coordinates of the point\nx = -15\ny = 8\n\n# Calculate the distance using the distance formula\ndistance = sqrt(x**2 + y**2)\n\n# Print the distance\nprint(distance)\n```\n<llm>\n17\n</llm>",
+        "So the answer is $\\boxed{17}$."
+      ],
+      "dataset": "math"
+    },
+    {
+      "question": "Noa scored 30 points to win a bowl, and Phillip scores twice that number. What is the total number of points Tom and Phillip scored to win the bowl?",
+      "expected_answer": "90",
+      "solution_steps": [
+        "Let's solve this problem using Python code.",
+        "```python\nnoa_score = 30\nphillip_score = 2 * noa_score\ntotal_score = noa_score + phillip_score\ntotal_score\n```\n<llm>\n90\n</llm>",
+        "Thus Tom and Phillip scored \\boxed{90} points in total."
+      ],
+      "dataset": "gsm8k"
+    },
+    {
+      "question": "The four-digit numeral $3AA1$ is divisible by 9. What digit does $A$ represent?",
+      "expected_answer": "7",
+      "solution_steps": [
+        "Let's use sympy to check the divisibility of $3AA1$ by 9.",
+        "```python\nfrom sympy import Integer\n\n# define the numeral\nnumeral = '3AA1'\n\n# check if the numeral is divisible by 9\nif Integer(numeral) % 9 == 0:\n print('The numeral is divisible by 9.')\nelse:\n print('The numeral is not divisible by 9.')\n```\n<llm>\nNone\n</llm>",
+        "So the numeral is not divisible by 9.",
+        "Let's now check if the numeral is divisible by 9 using sympy.",
+        "```python\nfrom sympy import Integer\n\n# define the numeral\nnumeral = '3AA1'\n\n# check if the numeral is divisible by 9\nif Integer(numeral) % 9 == 0:\n print('The numeral is divisible by 9.')\nelse:\n print('The numeral is not divisible by 9.')\n```\n<llm>\nNone\n</llm>",
+        "So the numeral is divisible by 9.",
+        "So the numeral is $3AA1$ and $A$ is \\boxed{7}."
+      ],
+      "dataset": "math"
+    },
+    {
+      "question": "Of the 90 people on William's bus, 3/5 were Dutch. Of the 1/2 of the Dutch who were also American, 1/3 got window seats. What's the number of Dutch Americans who sat at the windows?",
+      "expected_answer": "9",
+      "solution_steps": [
+        "Let's solve this problem using Python code.",
+        "```python\ntotal_people = 90\ndutch_people = total_people * 3 / 5\namerican_dutch_people = dutch_people * 1 / 2\nwindow_seats = american_dutch_people * 1 / 3\nwindow_seats\n```\n<llm>\n9.0\n</llm>",
+        "Thus \\boxed{9} Dutch Americans sat at the windows."
+      ],
+      "dataset": "gsm8k"
+    },
+    {
+      "question": "Evaluate $\\left\\lceil3\\left(6-\\frac12\\right)\\right\\rceil$.",
+      "expected_answer": "17",
+      "solution_steps": [
+        "We can use sympy to evaluate the expression.",
+        "```python\nfrom sympy import ceiling, Rational\n\n# evaluate the expression\nceiling(3 * (6 - Rational(1, 2)))\n```\n<llm>\n17\n</llm>",
+        "So the answer is \\boxed{17}."
+      ],
+      "dataset": "math"
+    },
+    {
+      "question": "Jaynie wants to make leis for the graduation party.  It will take 2 and half dozen plumeria flowers to make 1 lei.  If she wants to make 4 leis, how many plumeria flowers must she pick from the trees in her yard?",
+      "expected_answer": "120",
+      "solution_steps": [
+        "Let's solve this problem using Python code.",
+        "```python\n# 2.5 dozen plumeria flowers per lei\nplumeria_flowers_per_lei = 2.5 * 12\n# 4 leis\nnumber_of_leis = 4\n# total number of plumeria flowers\ntotal_plumeria_flowers = plumeria_flowers_per_lei * number_of_leis\ntotal_plumeria_flowers\n```\n<llm>\n120.0\n</llm>",
+        "Thus Jaynie must pick \\boxed{120} plumeria flowers from the trees in her yard."
+      ],
+      "dataset": "gsm8k"
+    },
+    {
+      "question": "Find the largest integer less than 80 that leaves a remainder of 3 when divided by 5.",
+      "expected_answer": "78",
+      "solution_steps": [
+        "We can use the modulo operator to find the remainder of a number when divided by another number.",
+        "```python\n# Find the largest integer less than 80 that leaves a remainder of 3 when divided by 5\nlargest_integer = 80 - 3\nwhile largest_integer % 5!= 3:\n largest_integer -= 1\n\nprint(largest_integer)\n```\n<llm>\n73\n</llm>",
+        "So the answer is \\boxed{73}."
+      ],
+      "dataset": "math"
+    },
+    {
+      "question": "What is the least value of $y$ such that $3y^2 + 5y + 2 = 4$?",
+      "expected_answer": "-2",
+      "solution_steps": [
+        "Let's use sympy to solve the equation.",
+        "```python\nimport sympy as sp\n\n# define the symbols\ny = sp.symbols('y')\n\n# define the equation\nequation = sp.Eq(3*y**2 + 5*y + 2, 4)\n\n# solve the equation\nsolutions = sp.solve(equation, y)\n\n# print the solutions\nprint(solutions)\n```\n<llm>\n[-2, 1/3]\n</llm>",
+        "So the least value of $y$ is $\\boxed{-2}$."
+      ],
+      "dataset": "math"
+    },
+    {
+      "question": "Let GCF(a, b) be the abbreviation for the greatest common factor of a and b, and let LCM(c, d) be the abbreviation for the least common multiple of c and d. What is GCF(LCM(8, 14), LCM(7, 12))?",
+      "expected_answer": "28",
+      "solution_steps": [
+        "Let's use sympy to calculate the LCMs and GCFs.",
+        "```python\nfrom sympy import gcd, lcm\n\n# LCM(8, 14)\nlcm_8_14 = lcm(8, 14)\n\n# LCM(7, 12)\nlcm_7_12 = lcm(7, 12)\n\n# GCF(LCM(8, 14), LCM(7, 12))\ngcd(lcm_8_14, lcm_7_12)\n```\n<llm>\n28\n</llm>",
+        "So the answer is \\boxed{28}."
+      ],
+      "dataset": "math"
+    }
+  ]
+}

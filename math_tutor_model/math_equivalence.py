@@ -166,6 +166,10 @@ def is_equiv(str1, str2, verbose=False):
     str1_norm = str(str1).strip()
     str2_norm = str(str2).strip()
     
+    # Normalize text wrappers: \text{word} -> word
+    str1_norm = re.sub(r'\\text\{([^}]+)\}', r'\1', str1_norm)
+    str2_norm = re.sub(r'\\text\{([^}]+)\}', r'\1', str2_norm)
+    
     # Normalize complex numbers: I -> i, *I -> i, *i -> i
     str1_norm = re.sub(r'\*I\b', 'i', str1_norm)
     str1_norm = re.sub(r'\*i\b', 'i', str1_norm)
@@ -177,6 +181,10 @@ def is_equiv(str1, str2, verbose=False):
     # Normalize power notation: ** -> ^
     str1_norm = str1_norm.replace('**', '^')
     str2_norm = str2_norm.replace('**', '^')
+    
+    # Normalize fractions with pi: \pi/2 -> \frac{\pi}{2}
+    str1_norm = re.sub(r'\\pi/(\d+)', r'\\frac{\\pi}{\1}', str1_norm)
+    str2_norm = re.sub(r'\\pi/(\d+)', r'\\frac{\\pi}{\1}', str2_norm)
     
     # Remove explicit multiplication before variables: 2*k -> 2k, 3*x -> 3x
     str1_norm = re.sub(r'(\d)\*([a-zA-Z])', r'\1\2', str1_norm)

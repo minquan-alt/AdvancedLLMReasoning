@@ -2,6 +2,7 @@ import torch
 import gc
 import json
 import os
+import sys
 from datasets import load_dataset, Dataset
 from collections import defaultdict, deque
 from tqdm import tqdm
@@ -11,7 +12,13 @@ import re
 import random
 from huggingface_hub import login
 
+from utils.prompt import SYSTEM_PROMPT_V3
+from utils.inference_utils import StopOnTripleBacktickNewline, execute_python_code, solve_math_problem
+
+from dotenv import load_dotenv
+load_dotenv()
 login(token=os.getenv('HF_AUTH_TOKEN'))
+
 
 ds = load_dataset("nvidia/OpenMathInstruct-1", split='train')
 
@@ -41,22 +48,27 @@ len_questions = len(unique_questions)
 
 # ============= Helper Functions =============
 def parse_solution_into_steps(solution):
+    """
+    Parse solution into steps, handling code blocks with outputs (v3 format).
+    Code blocks + <llm>...</llm> outputs are single steps.
+    Text is split by sentences.
+    """
     steps = []
     
-    block_pattern = r'(<llm-code>.*?</llm-code>|<llm-code-output>.*?</llm-code-output>)'
-    parts = re.split(block_pattern, solution, flags=re.DOTALL)
+    # Pattern: code block followed by <llm> output
+    pattern = r'(```python\s*\n.*?\n```\s*<llm>.*?</llm>)'
+    parts = re.split(pattern, solution, flags=re.DOTALL)
     
     for part in parts:
         part = part.strip()
         if not part:
             continue
         
-        # code block or code-output block, keep as one step
-        if part.startswith('<llm-code>') or part.startswith('<llm-code-output>'):
+        # Code block with output
+        if part.startswith('```python'):
             steps.append(part)
-        
-        # Plain text - split by sentences (dấu chấm)
         else:
+            # Split remaining text by sentences
             sentences = re.split(r'(?<=[.!?])\s+', part)
             for sent in sentences:
                 sent = sent.strip()
@@ -75,7 +87,7 @@ def clean_text(text):
 
 # ============= Load Model =============
 print("Loading model...")
-ADAPTER_PATH = "/home/guest/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v2/final_checkpoint" 
+ADAPTER_PATH = "/home/guest/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v3/final_checkpoint" 
 BASE_MODEL_ID = "meta-llama/Llama-3.2-1B"
 
 bnb_config = BitsAndBytesConfig(
@@ -95,7 +107,7 @@ base_model = AutoModelForCausalLM.from_pretrained(
 )
 
 tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID)
-# tokenizer.pad_token = tokenizer.eos_token
+tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'  # left for implement
 
 tokenizer.chat_template = """{{ bos_token }}
@@ -114,24 +126,13 @@ sft_model.eval()
 # ============= Setup =============
 seed = 42
 random.seed(seed)
-
-system_prompt = (
-            "You are a math reasoning assistant.\n"
-            "Solve the problem step by step.\n"
-            "You can use Python code if needed.\n"
-            "If you write code, put it inside a Python code block:\n"
-            "```python\n"
-            "...\n"
-            "```\n"
-            "Output ONLY the final number inside \\boxed{}."
-        )
+system_prompt = SYSTEM_PROMPT_V3
 
 # ============= Main Generation Loop =============
 GSM8K_STEPS_TARGET = 100000
 MATH_STEPS_TARGET = 200000
-BATCH_SIZE = 64
 
-# Backup data ban đầu để reset khi cần
+# dùng để reset khi hết data
 original_data = {
     'gsm8k': list(s_deque['gsm8k']),
     'math': list(s_deque['math'])
@@ -147,126 +148,80 @@ total_questions = 0
 batch_questions = []
 batch_answers = []
 batch_prompts = []
-batch_datasets = [] # Lưu loại dataset của từng sample trong batch
+batch_datasets = [] # lưu loại dataset của từng sample trong batch
 
 print(f"\nStarting generation...")
 print(f"Targets: GSM8K={GSM8K_STEPS_TARGET}, MATH={MATH_STEPS_TARGET}")
-print(f"Batch size: {BATCH_SIZE}\n")
+print(f"Sequential iterative inference\n")
 
 total_target = GSM8K_STEPS_TARGET + MATH_STEPS_TARGET
 
 with tqdm(total=total_target, desc="Steps collected") as pbar:
     while gsm8k_steps_count < GSM8K_STEPS_TARGET or math_steps_count < MATH_STEPS_TARGET:
         
-        # Thu thập batch
-        while len(batch_prompts) < BATCH_SIZE:
-            
-            # Chọn dataset nào để lấy sample
-            # Logic: Lấy từ dataset chưa đủ chỉ tiêu. Nếu cả 2 đều chưa đủ, lấy xen kẽ.
-            current_dataset = None
-            
-            need_gsm8k = gsm8k_steps_count < GSM8K_STEPS_TARGET
-            need_math = math_steps_count < MATH_STEPS_TARGET
-            
-            if need_gsm8k and need_math:
-                current_dataset = g_cycle[0]
-                g_cycle.rotate(-1) # Xoay vòng
-            elif need_gsm8k:
-                current_dataset = 'gsm8k'
-            elif need_math:
-                current_dataset = 'math'
-            else:
-                break # Đã đủ cả 2
-
-            # Lấy sample từ queue
-            dq = s_deque[current_dataset]
-            
-            # Nếu hết data, reset từ backup
-            if not dq:
-                random.shuffle(original_data[current_dataset]) # Shuffle cho đa dạng
-                dq.extend(original_data[current_dataset])
-                s_deque[current_dataset] = dq
-                # print(f"\nReset queue for {current_dataset}")
-
-            s = dq.popleft()
-            question = s['question']
-            answer = s['answer']
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": clean_text(question)}
-            ]
-
-            prompt = tokenizer.apply_chat_template(
-                messages, 
-                tokenize=False, 
-                add_generation_prompt=True
-            )
-            
-            batch_prompts.append(prompt)
-            batch_questions.append(question)
-            batch_answers.append(answer)
-            batch_datasets.append(current_dataset)
+        # Chọn dataset nào để lấy sample
+        current_dataset = None
         
-        # Nếu đã đủ chỉ tiêu cả 2 mà batch trống -> Dừng
-        if len(batch_prompts) == 0:
+        need_gsm8k = gsm8k_steps_count < GSM8K_STEPS_TARGET
+        need_math = math_steps_count < MATH_STEPS_TARGET
+        
+        if need_gsm8k and need_math:
+            current_dataset = g_cycle[0]
+            g_cycle.rotate(-1)
+        elif need_gsm8k:
+            current_dataset = 'gsm8k'
+        elif need_math:
+            current_dataset = 'math'
+        else:
             break
+
+        # Lấy sample từ queue
+        dq = s_deque[current_dataset]
         
-        # Tokenize và generate cho batch
-        inputs = tokenizer(batch_prompts, return_tensors="pt", padding=True, truncation=True).to(sft_model.device)
+        if not dq:
+            random.shuffle(original_data[current_dataset])
+            dq.extend(original_data[current_dataset])
+            s_deque[current_dataset] = dq
 
-        with torch.no_grad():
-            outputs = sft_model.generate(
-                **inputs, 
-                max_new_tokens=512, 
-                temperature=1.0, 
-                top_p=0.95, 
-                do_sample=True, 
-                pad_token_id=tokenizer.eos_token_id
-            )
+        s = dq.popleft()
+        question = s['question']
+        answer = s['answer']
+        
+        # Sử dụng inference mới với iterative generation
+        solution = solve_math_problem(sft_model, tokenizer, clean_text(question), SYSTEM_PROMPT_V3, max_length=512)
+        
+        steps = parse_solution_into_steps(solution)
+        if not steps:
+            continue
 
-        # Xử lý từng output trong batch
-        for idx in range(len(batch_prompts)):
-            generated_ids = outputs[idx][inputs["input_ids"].shape[-1]:]
-            solution = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-
-            steps = parse_solution_into_steps(solution)
-            if not steps:
+        num_steps = len(steps)
+        
+        # Check xem dataset này còn cần thêm steps không
+        if current_dataset == 'gsm8k':
+            if gsm8k_steps_count >= GSM8K_STEPS_TARGET:
                 continue
+            gsm8k_steps_count += num_steps
+        else:
+            if math_steps_count >= MATH_STEPS_TARGET:
+                continue
+            math_steps_count += num_steps
 
-            num_steps = len(steps)
-            ds_type = batch_datasets[idx]
-            
-            # Check xem dataset này còn cần thêm steps không
-            if ds_type == 'gsm8k':
-                if gsm8k_steps_count >= GSM8K_STEPS_TARGET:
-                    continue # Bỏ qua nếu đã đủ
-                gsm8k_steps_count += num_steps
-            else: # math
-                if math_steps_count >= MATH_STEPS_TARGET:
-                    continue
-                math_steps_count += num_steps
+        total_questions += 1
+        pbar.update(num_steps)
 
-            total_questions += 1
-            pbar.update(num_steps)
-
-            prm_dataset.append({
-                "question": batch_questions[idx],
-                "expected_answer": batch_answers[idx],
-                "solution_steps": steps,
-                "dataset": ds_type
-            })
+        prm_dataset.append({
+            "question": question,
+            "expected_answer": answer,
+            "solution_steps": steps,
+            "dataset": current_dataset
+        })
         
-        # Clear batch và GPU cache
-        batch_prompts = []
-        batch_questions = []
-        batch_answers = []
-        batch_datasets = []
-        del inputs, outputs
+        # Clear GPU cache
         torch.cuda.empty_cache()
 
 # ============= Save Final Dataset =============
-final_path = "prm_dataset_final.json"
+final_path = "/home/guest/AdvancedLLMReasoning/data/prm_dataset_final.json"
+os.makedirs(os.path.dirname(final_path), exist_ok=True)
 with open(final_path, 'w', encoding='utf-8') as f:
     json.dump({
         "total_steps": gsm8k_steps_count + math_steps_count,
