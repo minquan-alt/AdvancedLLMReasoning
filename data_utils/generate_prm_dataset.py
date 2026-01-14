@@ -1,62 +1,158 @@
+import sys
+sys.path.append('/home/guest/AdvancedLLMReasoning/')
+
+from datasets import load_dataset, load_from_disk
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import torch
-import gc
+import re
+from collections import defaultdict
+from tqdm import tqdm
+import random
 import json
 import os
-from datasets import load_dataset, Dataset
-from collections import defaultdict, deque
-from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from peft import PeftModel
-import re
-import random
-from huggingface_hub import login
 
-login(token=os.getenv('HF_AUTH_TOKEN'))
+from math_tutor_model.math_equivalence import is_equiv
+from utils.prompt import SYSTEM_PROMPT_V3, COMPLETER_SYSTEM_PROMPT
+from utils.inference_utils import solve_math_problem
 
+seed = 42
+ran = random.Random(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
 ds = load_dataset("nvidia/OpenMathInstruct-1", split='train')
 
-g_cycle = deque(['gsm8k', 'math'])
-s_deque = {'gsm8k': deque(), 'math': deque()}
-unique_questions = set()
+with open("/home/guest/AdvancedLLMReasoning/data/full_questions_seed42.json", "r", encoding="utf-8") as f:
+    data = json.load(f)
+groups = data['groups']
+gsm8k_questions = data['gsm8k_questions']
+math_questions = data['math_questions']
 
-for i, ex in enumerate(tqdm(ds, desc='Iterating dataset')):
-    dataset_name = ex.get('dataset')
-    question = ex.get('question')
-    # chỉ xét sample đúng
-    if ex['is_correct'] != True:
-        continue
-    if question in unique_questions or dataset_name not in ('gsm8k', 'math'):
-        continue
+def load_model(model_id="sft", data_path=3, BASE_MODEL_ID="meta-llama/Llama-3.2-1B"):
+    if model_id == "rl":
+        ADAPTER_PATH = "math_tutor_model/math_rl_adapter/final_checkpoint"
+    elif model_id == "sft":
+        ADAPTER_PATH = f"/home/guest/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v{data_path}/final_checkpoint" 
+    else:
+        ADAPTER_PATH = None
+
+    print(f"Loading...")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True, bnb_4bit_use_double_quant=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL_ID, quantization_config=bnb_config, device_map="auto", torch_dtype=torch.bfloat16
+    )
+    print("Base Model loaded")
     
-    unique_questions.add(question)
-    s_deque[dataset_name].append({
-        'question': question,
-        'answer': ex.get('expected_answer'),
-    })
+    if ADAPTER_PATH:
+        tokenizer = AutoTokenizer.from_pretrained(ADAPTER_PATH)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID)
+    
+    tokenizer.padding_side = "left"
+    if data_path < 3:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    try:
+        model = PeftModel.from_pretrained(base_model, ADAPTER_PATH)
+        print(f"Adapter loaded from: {ADAPTER_PATH}")
+    except:
+        print("Không load được Adapter.")
+        exit(1)
 
-del ds
-gc.collect()
-print(f"Loaded {len(unique_questions)} unique questions")
-len_questions = len(unique_questions)
+    model.eval()
+    return model, tokenizer
 
-# ============= Helper Functions =============
+def load_completer_model(BASE_MODEL_ID="meta-llama/Llama-3.1-8B-Instruct"):
+    """
+    Load model dùng để complete/đánh giá các bước giải
+    Dùng cho PRM (Process Reward Model) hoặc step completion
+    """
+    print(f"Loading completer model: {BASE_MODEL_ID}...")
+    
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL_ID,
+        quantization_config=bnb_config,
+        device_map="auto",
+        torch_dtype=torch.bfloat16,
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        BASE_MODEL_ID,
+    )
+    
+    tokenizer.padding_side = "left"
+    if not tokenizer.pad_token:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    model.eval()
+    print("Completer model loaded successfully!")
+    return model, tokenizer
+
+
+def extract_answer(text: str) -> str:
+    """
+    Extract answer from \\boxed{} or <llm>...</llm> as fallback
+    Priority: \\boxed{} > <llm>...</llm>
+    """
+    # Try to extract from \boxed{} first
+    if "\\boxed{" in text:
+        idx = text.rfind("\\boxed{")
+        content = ""
+        count = 0
+        started = False
+        for char in text[idx:]:
+            if char == "{":
+                count += 1
+                started = True
+                if count == 1: 
+                    continue
+            elif char == "}":
+                count -= 1
+            if started:
+                if count == 0: 
+                    break
+                content += char
+        return content.strip()
+    
+    # Fallback: extract from <llm>...</llm> tag
+    if "<llm>" in text and "</llm>" in text:
+        match = re.search(r'<llm>(.*?)</llm>', text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+    
+    return None
+
 def parse_solution_into_steps(solution):
+    """
+    Parse solution into steps, handling code blocks with outputs (v3 format).
+    Code blocks + <llm>...</llm> outputs are single steps.
+    Text is split by sentences.
+    """
     steps = []
     
-    block_pattern = r'(<llm-code>.*?</llm-code>|<llm-code-output>.*?</llm-code-output>)'
-    parts = re.split(block_pattern, solution, flags=re.DOTALL)
+    # Pattern: code block followed by <llm> output
+    pattern = r'(```python\s*\n.*?\n```\s*<llm>.*?</llm>)'
+    parts = re.split(pattern, solution, flags=re.DOTALL)
     
     for part in parts:
         part = part.strip()
         if not part:
             continue
         
-        # code block or code-output block, keep as one step
-        if part.startswith('<llm-code>') or part.startswith('<llm-code-output>'):
+        # Code block with output
+        if part.startswith('```python'):
             steps.append(part)
-        
-        # Plain text - split by sentences (dấu chấm)
         else:
+            # Split remaining text by sentences
             sentences = re.split(r'(?<=[.!?])\s+', part)
             for sent in sentences:
                 sent = sent.strip()
@@ -73,261 +169,265 @@ def clean_text(text):
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text
 
-def save_checkpoint(prm_dataset, total_steps, total_questions, checkpoint_num):
-    """Save checkpoint to disk and return empty list to free memory"""
-    checkpoint_dir = "checkpoints"
-    os.makedirs(checkpoint_dir, exist_ok=True)
+completer_model, completer_tokenizer = load_completer_model()
+generator_model, generator_tokenizer = load_model()
+
+completer_tokenizer.chat_template = """{{ bos_token }}
+{% for message in messages -%}
+<|start_header_id|>{{ message['role'] }}<|end_header_id|>
+{{ message['content'] | trim }}
+{% if not loop.last or message['role'] != 'assistant' -%}
+<|eot_id|>
+{% endif -%}
+{%- endfor %}
+{% if add_generation_prompt -%}
+<|start_header_id|>assistant<|end_header_id|>
+{%- endif %}
+"""
+# generator có chat_template khi train rồi nên k cần thiết lập
+completer_model.eval()
+generator_model.eval()
+
+generator_temperature = 0.6
+generator_top_p = 0.95
+
+completer_temperature = 0.9
+completer_top_p = 0.95
+# N = 8
+N_solutions = 8 # For testing, infer use N = 8
+N_trajectories = 4 # For testing, infer use N = 4
+
+# Unified configuration
+GENERATOR_MAX_NEW_TOKENS = 740
+COMPLETER_MAX_NEW_TOKENS = 740
+COMPLETER_SYSTEM_PROMPT = """You are a math reasoning expert.
+Your task is to continue a partial solution to a math problem and reach the final answer.
+
+### Instructions:
+1. **Context:** You will be given a "Problem" and a "Partial Solution".
+2. **Continuity:** Continue the reasoning logic naturally from the last step of the Partial Solution.
+3. **Tools:** You can use Python code if needed. If you write code, put it inside a Python code block:
+```python
+...
+```
+4. Constraints:
+    ◦ CRITICAL: Do NOT repeat, rephrase, or correct the Partial Solution.
+    ◦ Treat the Partial Solution as immutable history.
+    ◦ You can use AT MOST ONE Python code block, DO NOT use multiple code blocks.
+    ◦ STRICTLY: Your final output must be the final answer to the problem.
+5. Format: After finding the result, stop generating immediately and output ONLY the final number inside \\boxed{}.
+**MANDATORY** - Every response MUST contain \\boxed{number}. Responses without \\boxed{} are INVALID and will be rejected.
+
+### WRONG Examples (DO NOT DO THIS):
+❌ "So the answer is that these sacks will last for 2 days."
+❌ "The number of students is 25."
+❌ "The class can take 25 students on the field trip."
+
+### CORRECT Examples:
+
+**Example 1:**
+Problem: "A car travels 60 km in 2 hours. How fast is it going?"
+Partial Solution: "Let's calculate the speed."
+YOUR RESPONSE: 
+```python
+speed = 60 / 2
+```
+\\boxed{30}
+
+**Example 2:**
+Problem: "What is 15 + 27?"
+Partial Solution: "We need to add these two numbers."
+YOUR RESPONSE: \\boxed{42}
+
+**Example 3:**
+Problem: "John has 5 apples. He buys 3 more. How many does he have?"
+Partial Solution: "Let's solve this step by step.
+```python
+initial = 5
+bought = 3
+```"
+YOUR RESPONSE:
+```python
+total = initial + bought
+```
+\\boxed{8}
+
+### Your Turn:
+Now continue the Partial Solution and output ONLY \\boxed{answer}."""
+
+def process_question(q, dataset_type, truth):
+    metadata_dict = {}
+    metadata_dict['question'] = q
+    metadata_dict['expected_answer'] = truth
+    metadata_dict['question_metadata'] = []
     
-    checkpoint_path = os.path.join(checkpoint_dir, f"prm_dataset_checkpoint_{checkpoint_num}.json")
-    
-    # Chỉ lưu data mới từ checkpoint này
-    with open(checkpoint_path, 'w', encoding='utf-8') as f:
-        json.dump(prm_dataset, f, ensure_ascii=False, indent=2)
-    
-    print(f"\n[Checkpoint {checkpoint_num}] Saved: {len(prm_dataset)} samples, {total_steps} total steps")
-    
-    # Return empty list để giải phóng memory
+    for sol_idx in range(N_solutions):
+        try:
+            question_metadata_dict = {}
+            answer = solve_math_problem(
+                generator_model, 
+                generator_tokenizer, 
+                clean_text(q), 
+                SYSTEM_PROMPT_V3, 
+                max_length=GENERATOR_MAX_NEW_TOKENS,
+                action='inference', 
+                temperature=generator_temperature, 
+                top_p=generator_top_p
+            )
+            solution_answer = extract_answer(answer)
+            solution_correct = is_equiv(solution_answer, truth)
+            
+            # Validate solution quality
+            tokens = generator_tokenizer.encode(answer)
+            token_count = len(tokens)
+            has_boxed = r'\boxed{' in answer
+            
+            # Skip problematic solutions: both conditions must be true
+            if token_count > 800 and not has_boxed:
+                print(f"Skipping solution {sol_idx + 1}: Too long ({token_count} tokens) and no boxed answer")
+                continue
+            
+            steps = parse_solution_into_steps(answer)
+            
+            question_metadata_dict['solution'] = answer
+            question_metadata_dict['solution_answer'] = solution_answer
+            question_metadata_dict['solution_correct'] = solution_correct
+            question_metadata_dict['steps'] = steps
+            question_metadata_dict['labels'] = []
+            question_metadata_dict['step_metadata'] = []
+            
+            for step_idx in range(len(steps)-1):
+                try:
+                    step_metadata_dict = {}
+                    past_steps_str = "\n".join(steps[:step_idx+1]) + "\n"
+                    
+                    messages = [
+                        {"role": "system", "content": COMPLETER_SYSTEM_PROMPT},
+                        {"role": "user", "content": clean_text(q)},
+                        {"role": "assistant", "content": past_steps_str}
+                    ]
+
+                    prompt = completer_tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=False
+                    )
+                    
+                    inputs = completer_tokenizer(
+                        prompt, 
+                        padding=False, 
+                        add_special_tokens=False,
+                        return_tensors="pt"
+                    ).to(completer_model.device)
+                    
+                    step_metadata_dict['previous_steps'] = past_steps_str.strip()
+                    step_metadata_dict['completions'] = ['-'] * N_trajectories
+                    step_metadata_dict['is_correct'] = ['-'] * N_trajectories
+                    
+                    # Sequential generation with early stopping
+                    for traj_idx in range(N_trajectories):
+                        try:
+                            with torch.no_grad():
+                                outputs = completer_model.generate(
+                                    **inputs,
+                                    max_new_tokens=COMPLETER_MAX_NEW_TOKENS,
+                                    temperature=completer_temperature,
+                                    top_p=completer_top_p,
+                                    do_sample=True,
+                                    pad_token_id=completer_tokenizer.eos_token_id,
+                                    eos_token_id=completer_tokenizer.eos_token_id,
+                                )
+                            completion = completer_tokenizer.decode(
+                                outputs[0][inputs['input_ids'].shape[1]:], 
+                                skip_special_tokens=True
+                            )
+                            completion_answer = extract_answer(completion)
+                            
+                            step_metadata_dict['completions'][traj_idx] = completion.strip()
+                            
+                            if is_equiv(completion_answer, truth):
+                                step_metadata_dict['is_correct'][traj_idx] = "[CORRECT]"
+                                step_metadata_dict['label'] = "[CORRECT]"
+                                question_metadata_dict['labels'].append("[CORRECT]")
+                                break  # Early stopping: found correct answer
+                            else:
+                                step_metadata_dict['is_correct'][traj_idx] = "[INCORRECT]"
+                        except Exception as e:
+                            print(f"Error in trajectory {traj_idx}: {e}")
+                            step_metadata_dict['is_correct'][traj_idx] = "[ERROR]"
+                            
+                    if 'label' not in step_metadata_dict:
+                        step_metadata_dict['label'] = "[INCORRECT]"
+                        question_metadata_dict['labels'].append("[INCORRECT]")
+                    
+                    question_metadata_dict['step_metadata'].append(step_metadata_dict)
+                except Exception as e:
+                    print(f"Error processing step {step_idx}: {e}")
+                    
+            metadata_dict['question_metadata'].append(question_metadata_dict)
+        except Exception as e:
+            print(f"Error processing solution {sol_idx} for question: {e}")
+            
+    return metadata_dict
+
+# Checkpoint files
+CHECKPOINT_DIR = "/home/guest/AdvancedLLMReasoning/data/checkpoints"
+GSM8K_CHECKPOINT = os.path.join(CHECKPOINT_DIR, "gsm8k_checkpoint.json")
+MATH_CHECKPOINT = os.path.join(CHECKPOINT_DIR, "math_checkpoint.json")
+
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+# Load existing checkpoints if available
+def load_checkpoint(checkpoint_file):
+    if os.path.exists(checkpoint_file):
+        with open(checkpoint_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            print(f"Loaded checkpoint from {checkpoint_file}: {len(data)} questions completed")
+            return data
     return []
 
-def load_latest_checkpoint():
-    """Load metadata from latest checkpoint and return processed questions"""
-    checkpoint_dir = "checkpoints"
-    if not os.path.exists(checkpoint_dir):
-        return 0, 0, 0, set()
+def save_checkpoint(checkpoint_file, data):
+    with open(checkpoint_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+# Process GSM8K with checkpointing
+gsm8k_metadata = load_checkpoint(GSM8K_CHECKPOINT)
+processed_gsm8k = {item['question'] for item in gsm8k_metadata}
+
+for q in tqdm(gsm8k_questions[:2], desc="Processing GSM8K"):
+    if q in processed_gsm8k:
+        continue
+    truth = ds[groups['gsm8k'][q][0]]['expected_answer']
+    metadata_dict = process_question(q, 'gsm8k', truth)
+    gsm8k_metadata.append(metadata_dict)
     
-    checkpoints = [f for f in os.listdir(checkpoint_dir) if f.startswith("prm_dataset_checkpoint_")]
-    if not checkpoints:
-        return 0, 0, 0, set()
+    # Save checkpoint every question
+    save_checkpoint(GSM8K_CHECKPOINT, gsm8k_metadata)
+
+# Process MATH with checkpointing
+math_metadata = load_checkpoint(MATH_CHECKPOINT)
+processed_math = {item['question'] for item in math_metadata}
+
+for q in tqdm(math_questions[:2], desc="Processing MATH"):
+    if q in processed_math:
+        continue
+    truth = ds[groups['math'][q][0]]['expected_answer']
+    metadata_dict = process_question(q, 'math', truth)
+    math_metadata.append(metadata_dict)
     
-    # Get latest checkpoint number
-    checkpoint_nums = [int(f.split('_')[-1].split('.')[0]) for f in checkpoints]
-    latest_num = max(checkpoint_nums)
-    
-    # Count total steps and questions từ tất cả checkpoints
-    # Và collect tất cả questions đã xử lý
-    total_steps = 0
-    total_questions = 0
-    processed_questions = set()
-    
-    for num in sorted(checkpoint_nums):
-        checkpoint_path = os.path.join(checkpoint_dir, f"prm_dataset_checkpoint_{num}.json")
-        with open(checkpoint_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            total_questions += len(data)
-            for item in data:
-                total_steps += len(item['solution_steps'])
-                processed_questions.add(item['question'])
-    
-    print(f"Resuming from checkpoint {latest_num}: {total_questions} questions, {total_steps} steps")
-    print(f"Skipping {len(processed_questions)} already processed questions")
-    return total_steps, total_questions, latest_num, processed_questions
+    # Save checkpoint every question
+    save_checkpoint(MATH_CHECKPOINT, math_metadata)
 
-# ============= Load Model =============
-print("Loading model...")
-ADAPTER_PATH = "/home/quang_ai/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v2/final_checkpoint" 
-BASE_MODEL_ID = "meta-llama/Llama-3.2-1B"
+# lưu kết quả ra file
+output_data = {
+    "gsm8k_metadata": gsm8k_metadata,
+    "math_metadata": math_metadata
+}
 
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
-    llm_int8_enable_fp32_cpu_offload=True
-)
+os.makedirs("/home/guest/AdvancedLLMReasoning/data", exist_ok=True)
+with open("/home/guest/AdvancedLLMReasoning/data/prm_dataset.json", "w", encoding="utf-8") as f:
+    json.dump(output_data, f, indent=4, ensure_ascii=False)
 
-base_model = AutoModelForCausalLM.from_pretrained(
-    BASE_MODEL_ID,
-    quantization_config=bnb_config,
-    device_map="auto",
-    torch_dtype=torch.bfloat16,
-    low_cpu_mem_usage=True
-)
-
-tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID)
-tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = 'left'  # Fix cho decoder-only models
-
-sft_model = PeftModel.from_pretrained(base_model, ADAPTER_PATH)
-sft_model.eval()
-
-# ============= Setup =============
-seed = 42
-random.seed(seed)
-
-instruction = (
-    "Solve the problem step by step. You can use Python code if needed.\n"
-    "If you write code, wrap it inside <llm-code> ... </llm-code>.\n"
-    "Output ONLY the final number inside \\boxed{}."
-)
-
-# ============= Main Generation Loop =============
-TARGET_SIZE = 200000
-BATCH_SIZE = 64
-CHECKPOINT_INTERVAL = 5000  # Save mỗi 5000 steps
-
-# Load checkpoint nếu có
-total_steps, total_questions, checkpoint_num, processed_questions = load_latest_checkpoint()
-
-# prm_dataset chỉ lưu tạm, sẽ flush mỗi checkpoint
-prm_dataset = []
-
-g_cycle = deque(['gsm8k', 'math'])
-batch_questions = []
-batch_answers = []
-batch_prompts = []
-
-print(f"\nStarting generation from step {total_steps}/{TARGET_SIZE}")
-print(f"Batch size: {BATCH_SIZE}, Checkpoint every {CHECKPOINT_INTERVAL} steps\n")
-
-with tqdm(total=TARGET_SIZE, initial=total_steps, desc="Steps collected") as pbar:
-    while total_steps < TARGET_SIZE:
-        # Thu thập batch
-        attempts = 0
-        max_attempts = len_questions * 2  # Giới hạn số lần thử để tránh vòng lặp vô hạn
-        
-        while len(batch_prompts) < BATCH_SIZE and attempts < max_attempts:
-            attempts += 1
-            
-            # Check nếu hết data
-            if not s_deque['gsm8k'] and not s_deque['math']:
-                print("\nRan out of data in queues!")
-                break
-            
-            g = g_cycle.popleft()
-            g_cycle.append(g)
-
-            if not s_deque[g]:
-                continue
-
-            s = s_deque[g].popleft()
-            question = s['question']
-            answer = s['answer']
-            
-            # Skip nếu question đã được xử lý trong checkpoint trước
-            if question in processed_questions:
-                continue
-            
-            prompt = (
-                f"### Question:\n{clean_text(question)}\n\n"
-                f"### Instruction:\n{instruction}\n\n"
-                f"### Solution:\n"
-            )
-            
-            batch_prompts.append(prompt)
-            batch_questions.append(question)
-            batch_answers.append(answer)
-        
-        # Nếu không thu thập được batch đủ lớn, break
-        if len(batch_prompts) == 0:
-            print("\nNo more unprocessed questions available!")
-            break
-        
-        # Wrap generation trong try-except để handle OOM
-        try:
-            # Tokenize và generate cho batch
-            inputs = tokenizer(batch_prompts, return_tensors="pt", padding=True, truncation=True).to(sft_model.device)
-
-            with torch.no_grad():
-                outputs = sft_model.generate(
-                    **inputs, 
-                    max_new_tokens=512, 
-                    temperature=0.7, 
-                    top_p=0.9, 
-                    do_sample=True, 
-                    pad_token_id=tokenizer.eos_token_id
-                )
-        
-        except torch.cuda.OutOfMemoryError as e:
-            print(f"\n⚠ CUDA OOM detected! Saving progress and waiting for memory...")
-            
-            # Clear GPU cache
-            del inputs
-            if 'outputs' in locals():
-                del outputs
-            torch.cuda.empty_cache()
-            gc.collect()
-            
-            # Save current progress nếu có data
-            if prm_dataset:
-                checkpoint_num += 1
-                prm_dataset = save_checkpoint(prm_dataset, total_steps, total_questions, checkpoint_num)
-            
-            # Wait for GPU memory
-            wait_for_gpu_memory(required_gb=10, check_interval=30)
-            
-            # Retry batch này
-            print("Retrying current batch...")
-            continue
-
-        # Xử lý từng output trong batch
-        for idx in range(len(batch_prompts)):
-            generated_ids = outputs[idx][inputs["input_ids"].shape[-1]:]
-            solution = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-
-            steps = parse_solution_into_steps(solution)
-            if not steps:
-                continue
-
-            num_steps = len(steps)
-            if total_steps + num_steps > TARGET_SIZE:
-                break
-
-            total_steps += num_steps
-            total_questions += 1
-            pbar.update(num_steps)
-
-            prm_dataset.append({
-                "question": batch_questions[idx],
-                "expected_answer": batch_answers[idx],
-                "solution_steps": steps
-            })
-        
-        # Clear batch và GPU cache
-        batch_prompts = []
-        batch_questions = []
-        batch_answers = []
-        del inputs, outputs
-        torch.cuda.empty_cache()
-        
-        # Save checkpoint và flush data
-        if total_steps // CHECKPOINT_INTERVAL > checkpoint_num:
-            checkpoint_num = total_steps // CHECKPOINT_INTERVAL
-            prm_dataset = save_checkpoint(prm_dataset, total_steps, total_questions, checkpoint_num)
-            gc.collect()  # Garbage collection
-        
-        # Check nếu hết data
-        if not s_deque['gsm8k'] and not s_deque['math']:
-            print("\nRan out of data!")
-            break
-
-# ============= Save Final Dataset =============
-# Save phần còn lại nếu có
-if prm_dataset:
-    checkpoint_num += 1
-    save_checkpoint(prm_dataset, total_steps, total_questions, checkpoint_num)
-
-# Merge tất cả checkpoints thành 1 file final
-print("\nMerging all checkpoints into final dataset...")
-checkpoint_dir = "checkpoints"
-all_data = []
-
-checkpoints = sorted([f for f in os.listdir(checkpoint_dir) if f.startswith("prm_dataset_checkpoint_")],
-                     key=lambda x: int(x.split('_')[-1].split('.')[0]))
-
-for ckpt_file in checkpoints:
-    checkpoint_path = os.path.join(checkpoint_dir, ckpt_file)
-    with open(checkpoint_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-        all_data.extend(data)
-
-final_path = "prm_dataset_final.json"
-with open(final_path, 'w', encoding='utf-8') as f:
-    json.dump({
-        "total_steps": total_steps,
-        "total_questions": total_questions,
-        "dataset": all_data
-    }, f, ensure_ascii=False, indent=2)
-
-print(f"\n✓ Final dataset saved to {final_path}")
-print(f"Total questions: {total_questions}")
-print(f"Total steps: {total_steps}")
+print("\n✅ Dataset generation completed!")
+print(f"GSM8K: {len(gsm8k_metadata)} questions")
+print(f"MATH: {len(math_metadata)} questions")

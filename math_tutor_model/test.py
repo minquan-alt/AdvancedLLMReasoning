@@ -116,12 +116,11 @@ def post_process_solution_v0_v1_v2(generated_text):
     
     return trimmed_text
 
-def solve_math_problem_v3(model, tokenizer, question, max_length=512):
+def solve_math_problem_v3(model, tokenizer, question, max_length=512, action='test', temperature=0.8, top_p=0.9):
     """
     New iterative inference for v3 format with inline code execution.
     """
-    return solve_math_problem(model, tokenizer, question, SYSTEM_PROMPT_V3, max_length)
-
+    return solve_math_problem(model, tokenizer, question, SYSTEM_PROMPT_V3, max_length, action=action, temperature=temperature, top_p=top_p)
 def extract_answer(text):
     if "\\boxed{" in text:
         idx = text.rfind("\\boxed{")
@@ -179,7 +178,7 @@ def evaluate(model_id=None, dataset_name="gsm8k", data_path=1, num_samples=-1):
         # chọn inference theo data_path
         if data_path >= 3:
             # sử dụng inference mới cho v3
-            processed_solution = solve_math_problem_v3(model, tokenizer, question, max_length=512)
+            processed_solution = solve_math_problem_v3(model, tokenizer, question, max_length=512, action='test')
         else:
             # sử dụng inference cũ cho v0/v1/v2
             if data_path == 0:

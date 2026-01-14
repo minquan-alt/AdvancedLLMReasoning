@@ -50,7 +50,7 @@ def execute_python_code(code_str):
         sys.stdout = old_stdout
 
 
-def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512):
+def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512, action='test', temperature=0.8, top_p=0.9):
     """
     Iterative inference with inline code execution.
     
@@ -60,6 +60,7 @@ def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512
         question: Math problem question
         system_prompt: System prompt to use
         max_length: Maximum tokens to generate
+        action: 'inference' or 'test' to specify the mode of operation
     
     Returns:
         Full response string with code execution results
@@ -96,15 +97,27 @@ def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512
         if remaining_tokens <= 0:
             break
         with torch.no_grad():
-            output_ids = model.generate(
-                input_ids=input_ids,
-                max_new_tokens=remaining_tokens,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.convert_tokens_to_ids("<|eot_id|>"),
-                stopping_criteria=[StopOnTripleBacktickNewline(stop_token_ids)]
-            )
-
+            if action == 'test':
+                output_ids = model.generate(
+                    input_ids=input_ids,
+                    max_new_tokens=remaining_tokens,
+                    do_sample=False,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+                    stopping_criteria=[StopOnTripleBacktickNewline(stop_token_ids)]
+                )
+            else: # action == 'inference'
+                output_ids = model.generate(
+                    input_ids=input_ids,
+                    max_new_tokens=remaining_tokens,
+                    do_sample=True,
+                    temperature=temperature,
+                    top_p=top_p,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+                    stopping_criteria=[StopOnTripleBacktickNewline(stop_token_ids)]
+                )
+                
         new_ids = output_ids[0, input_ids.shape[1]:]
         num_new = new_ids.shape[0]
         total_generated += num_new

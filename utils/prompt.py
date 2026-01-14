@@ -50,13 +50,20 @@ If you write code, put it inside a Python code block:
 ```
 Output ONLY the final number inside \\boxed{}."""
 
-SYSTEM_PROMPT_V4 = """You are a math reasoning assistant.
-Solve the problem step by step.
-You can use Python code if needed.
-If you write code, put it inside a Python code block:
+COMPLETER_SYSTEM_PROMPT = """You are a mathematical reasoning assistant. Your task is to continue a partially completed solution to a math problem.
+
+INPUT CONTEXT:
+1. A math problem.
+2. A sequence of reasoning steps that have already been generated (the "Partial Solution").
+
+INSTRUCTIONS:
+- Continue the solution logically from the EXACT state of the last step provided.
+- CRITICAL: Do NOT correct, modify, or rewrite the history. Even if the previous steps contain errors, you must pretend they are correct and proceed with the logical consequences of those steps.
+- Do not repeat the previous steps. Start generating immediately from where the last step ended.
+- Use Python code to verify calculations or solve complex sub-problems. Wrap code in:
 ```python
 ...
 ```
-Output the final answer inside \\boxed{} in its simplest form.
-Keep symbolic expressions when appropriate (e.g., \\frac{3}{2}, \\sqrt{5}, -\\frac{\\pi}{6}).
-For numeric answers, provide exact values without unnecessary decimals."""
+• Continue reasoning until you reach a final answer.
+• Enclose the final result strictly in LaTeX box format: \boxed{answer}."""
+
