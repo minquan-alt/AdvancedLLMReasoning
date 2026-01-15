@@ -4,26 +4,11 @@ from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments, DataCollatorForSeq2Seq
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import torch
-
-def stats():
-    u = int(subprocess.check_output("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", shell=True))
-    used = int(subprocess.check_output("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits", shell=True))
-    total = int(subprocess.check_output("nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits", shell=True))
-    return u, used, total
-
-while True:
-    u, used, total = stats()
-    free = total - used
-    print(f"util={u}%, free={free}MB")
-    if u < 10 and free >= 20000:
-        break
-    time.sleep(10)
-
-print("start")
+from huggingface_hub import login
 
 load_dotenv()
 HF_AUTH_TOKEN = os.getenv('HF_AUTH_TOKEN')
-# login(HF_AUTH_TOKEN)
+login(HF_AUTH_TOKEN)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SFT Training for Math Model")
@@ -32,7 +17,6 @@ if __name__ == "__main__":
                         help="0: v0, 1: v1, 2: v2, 3: v3")
     args = parser.parse_args()
     
-    # --- CẬP NHẬT LOGIC ĐƯỜNG DẪN DATA ---
     if args.data_path == 0:
         data_path = 'data/processed_data_v0/256K/'
     elif args.data_path == 1:

@@ -3,10 +3,46 @@ import sys
 import re
 from io import StringIO
 from transformers import StoppingCriteria
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+def load_model(model_id="sft", data_path=3, BASE_MODEL_ID="meta-llama/Llama-3.2-1B"):
+    if model_id == "rl":
+        ADAPTER_PATH = "math_tutor_model/math_rl_adapter/final_checkpoint"
+    elif model_id == "sft":
+        ADAPTER_PATH = f"/home/guest/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v{data_path}/final_checkpoint" 
+    else:
+        ADAPTER_PATH = None
+
+    print(f"Loading...")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True, bnb_4bit_use_double_quant=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL_ID, quantization_config=bnb_config, device_map="auto", torch_dtype=torch.bfloat16
+    )
+    print("Base Model loaded")
+    
+    if ADAPTER_PATH:
+        tokenizer = AutoTokenizer.from_pretrained(ADAPTER_PATH)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID)
+    
+    tokenizer.padding_side = "left"
+    if data_path < 3:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    try:
+        model = PeftModel.from_pretrained(base_model, ADAPTER_PATH)
+        print(f"Adapter loaded from: {ADAPTER_PATH}")
+    except:
+        print("Không load được Adapter.")
+        exit(1)
+
+    model.eval()
+    return model, tokenizer
 
 class StopOnTripleBacktickNewline(StoppingCriteria):
-    """Stopping criteria to stop generation at ```\\n pattern."""
     def __init__(self, stop_ids):
         self.stop_ids = stop_ids
 
@@ -20,7 +56,6 @@ class StopOnTripleBacktickNewline(StoppingCriteria):
 
 
 def execute_python_code(code_str):
-    """Execute Python code and return the output."""
     try:
         old_stdout = sys.stdout
         sys.stdout = StringIO()
@@ -31,7 +66,6 @@ def execute_python_code(code_str):
         output = sys.stdout.getvalue()
         sys.stdout = old_stdout
         
-        # If no print output, try to get last expression value
         if not output.strip():
             code_lines = code_str.strip().split('\n')
             if code_lines:
@@ -51,20 +85,6 @@ def execute_python_code(code_str):
 
 
 def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512, action='test', temperature=0.8, top_p=0.9):
-    """
-    Iterative inference with inline code execution.
-    
-    Args:
-        model: The language model
-        tokenizer: The tokenizer
-        question: Math problem question
-        system_prompt: System prompt to use
-        max_length: Maximum tokens to generate
-        action: 'inference' or 'test' to specify the mode of operation
-    
-    Returns:
-        Full response string with code execution results
-    """
     stop_token_ids = tokenizer.encode("```\n", add_special_tokens=False)
     
     messages = [
@@ -162,3 +182,37 @@ def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512
             break
 
     return full_response
+
+def extract_answer(text: str) -> str:
+    if "\\boxed{" in text:
+        idx = text.rfind("\\boxed{")
+        content = ""
+        count = 0
+        started = False
+        for char in text[idx:]:
+            if char == "{":
+                count += 1
+                if count == 1:
+                    started = True
+                    continue
+            elif char == "}":
+                count -= 1
+                if count == 0:
+                    break
+            if started:
+                content += char
+        return content.strip()
+    
+    if "<llm>" in text and "</llm>" in text:
+        match = re.search(r'<llm>(.*?)</llm>', text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+    
+    return None
+def clean_text(text):
+    if not isinstance(text, str):
+        return ""
+    text = text.strip()
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text

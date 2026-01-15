@@ -162,15 +162,14 @@ def is_equiv(str1, str2, verbose=False):
     # ============== my addition ============: fix compare int and float strings, fix latex sqrt
     import re
     
-    # Simple normalization for common format differences
     str1_norm = str(str1).strip()
     str2_norm = str(str2).strip()
     
-    # Normalize text wrappers: \text{word} -> word
+    # \text{word} -> word
     str1_norm = re.sub(r'\\text\{([^}]+)\}', r'\1', str1_norm)
     str2_norm = re.sub(r'\\text\{([^}]+)\}', r'\1', str2_norm)
     
-    # Normalize complex numbers: I -> i, *I -> i, *i -> i
+    # I -> i, *I -> i, *i -> i
     str1_norm = re.sub(r'\*I\b', 'i', str1_norm)
     str1_norm = re.sub(r'\*i\b', 'i', str1_norm)
     str1_norm = re.sub(r'\bI\b', 'i', str1_norm)
@@ -178,23 +177,23 @@ def is_equiv(str1, str2, verbose=False):
     str2_norm = re.sub(r'\*i\b', 'i', str2_norm)
     str2_norm = re.sub(r'\bI\b', 'i', str2_norm)
     
-    # Normalize power notation: ** -> ^
+    # ** -> ^
     str1_norm = str1_norm.replace('**', '^')
     str2_norm = str2_norm.replace('**', '^')
     
-    # Normalize fractions with pi: \pi/2 -> \frac{\pi}{2}
+    # \pi/2 -> \frac{\pi}{2}
     str1_norm = re.sub(r'\\pi/(\d+)', r'\\frac{\\pi}{\1}', str1_norm)
     str2_norm = re.sub(r'\\pi/(\d+)', r'\\frac{\\pi}{\1}', str2_norm)
     
-    # Remove explicit multiplication before variables: 2*k -> 2k, 3*x -> 3x
+    # 2*k -> 2k, 3*x -> 3x
     str1_norm = re.sub(r'(\d)\*([a-zA-Z])', r'\1\2', str1_norm)
     str2_norm = re.sub(r'(\d)\*([a-zA-Z])', r'\1\2', str2_norm)
     
-    # Remove spaces
+    # remove spaces
     str1_norm = re.sub(r'\s+', '', str1_norm)
     str2_norm = re.sub(r'\s+', '', str2_norm)
     
-    # Quick check after normalization
+    # quick check
     if str1_norm == str2_norm:
         return True
     
@@ -216,7 +215,7 @@ def is_equiv(str1, str2, verbose=False):
         eval_str2 = str2_norm
         
         def replace_latex_frac(s):
-            # Convert \frac{a}{b} to (a)/(b), handling nested braces
+            # \frac{a}{b} -> (a)/(b)
             s = re.sub(r'\\frac\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}', r'(\1)/(\2)', s)
             return s
         
@@ -226,7 +225,7 @@ def is_equiv(str1, str2, verbose=False):
             s = re.sub(r'\)math\.sqrt', r')*math.sqrt', s)
             return s
         
-        # First convert fractions, then sqrt
+        # convert fractions, then sqrt
         eval_str1 = replace_latex_frac(eval_str1)
         eval_str2 = replace_latex_frac(eval_str2)
         
@@ -236,11 +235,11 @@ def is_equiv(str1, str2, verbose=False):
         eval_str1 = re.sub(r'(?<!math\.)sqrt\(', r'math.sqrt(', eval_str1)
         eval_str2 = re.sub(r'(?<!math\.)sqrt\(', r'math.sqrt(', eval_str2)
         
-        # Add * before math.sqrt if missing
+        # add * before math.sqrt if missing
         eval_str1 = re.sub(r'(\d)math\.sqrt', r'\1*math.sqrt', eval_str1)
         eval_str2 = re.sub(r'(\d)math\.sqrt', r'\1*math.sqrt', eval_str2)
         
-        # Convert ^ back to ** for eval
+        # ^ -> ** for eval
         eval_str1 = eval_str1.replace('^', '**')
         eval_str2 = eval_str2.replace('^', '**')
         

@@ -17,6 +17,12 @@ echo "=========================================="
 # echo -e "\n[3/10] Testing v2 on GSM8K..."
 # python -m math_tutor_model.test --data gsm8k --model sft --data_path 2
 
+echo -e "\n[x/10] Testing GRPO on GSM8K..."
+python -m math_tutor_model.test --data gsm8k --model grpo --data_path 3
+
+echo -e "\n[y/10] Testing GRPO on MATH..."
+python -m math_tutor_model.test --data math --model grpo --data_path 3
+
 echo -e "\n[4/10] Testing v2 on MATH..."
 python -m math_tutor_model.test --data math --model sft --data_path 2
 
@@ -26,8 +32,8 @@ python -m math_tutor_model.test --data gsm8k --model sft --data_path 1
 echo -e "\n[6/10] Testing v1 on MATH..."
 python -m math_tutor_model.test --data math --model sft --data_path 1
 
-echo -e "\n[7/10] Testing v0 on GSM8K..."
-python -m math_tutor_model.test --data gsm8k --model sft --data_path 0
+# echo -e "\n[7/10] Testing v0 on GSM8K..."
+# python -m math_tutor_model.test --data gsm8k --model sft --data_path 0
 
 echo -e "\n[8/10] Testing v0 on MATH..."
 python -m math_tutor_model.test --data math --model sft --data_path 0

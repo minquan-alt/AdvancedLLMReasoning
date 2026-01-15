@@ -10,7 +10,7 @@ import sys
 from io import StringIO
 from math_tutor_model.math_equivalence import is_equiv
 from utils.prompt import PROMPT_V0, PROMPT_V1, PROMPT_V2, SYSTEM_PROMPT_V3
-from utils.inference_utils import execute_python_code, solve_math_problem
+from utils.inference_utils import execute_python_code, solve_math_problem, extract_answer
 
 BASE_MODEL_ID = "meta-llama/Llama-3.2-1B"
 
@@ -18,7 +18,9 @@ def load_model(model_id="sft", data_path=1):
     if model_id == "rl":
         ADAPTER_PATH = "math_tutor_model/math_rl_adapter/final_checkpoint"
     elif model_id == "sft":
-        ADAPTER_PATH = f"/home/guest/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v{data_path}/final_checkpoint" 
+        ADAPTER_PATH = f"/home/guest/AdvancedLLMReasoning/math_tutor_model/math_sft_adapter/v{data_path}/final_checkpoint"
+    elif model_id == "grpo":
+        ADAPTER_PATH = "math_tutor_model/math_grpo_adapter/gsm8k_v1/checkpoint-100"
     else:
         ADAPTER_PATH = None
 
@@ -31,14 +33,13 @@ def load_model(model_id="sft", data_path=1):
     )
     print("Base Model loaded")
     
-    # Load tokenizer from adapter for v3 (has chat_template), otherwise from base model
     if ADAPTER_PATH:
         tokenizer = AutoTokenizer.from_pretrained(ADAPTER_PATH)
     else:
         tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID)
     
     tokenizer.padding_side = "left"
-    if data_path < 3:
+    if data_path < 3 and model_id != "grpo":
         tokenizer.pad_token = tokenizer.eos_token
     
     try:
@@ -52,7 +53,6 @@ def load_model(model_id="sft", data_path=1):
     return model, tokenizer
 
 def execute_python_code(code_str):
-    """Execute Python code and return the output."""
     try:
         old_stdout = sys.stdout
         sys.stdout = StringIO()
@@ -63,7 +63,6 @@ def execute_python_code(code_str):
         output = sys.stdout.getvalue()
         sys.stdout = old_stdout
         
-        # If no print output, try to get last expression value
         if not output.strip():
             code_lines = code_str.strip().split('\n')
             if code_lines:
@@ -82,31 +81,22 @@ def execute_python_code(code_str):
         sys.stdout = old_stdout
 
 def post_process_solution_v0_v1_v2(generated_text):
-    """
-    Post-process solution for v0/v1/v2 format (using <llm-code> tags):
-    1. Trim to line containing \\boxed{...}
-    2. If code is present, execute it and replace result in boxed
-    """
     match = re.search(r'^.*\\boxed\{[^}]+\}.*$', generated_text, re.MULTILINE)
     if match:
         trimmed_text = generated_text[:match.end()]
     else:
         trimmed_text = generated_text
     
-    # Check for Python code in <llm-code> tags
     code_match = re.search(r'<llm-code>\s*(.*?)\s*</llm-code>', trimmed_text, re.DOTALL)
     
     if code_match:
         code_str = code_match.group(1)
         
-        # Remove output tags
         trimmed_text = re.sub(r'<llm>.*?</llm>', '', trimmed_text, flags=re.DOTALL)
         trimmed_text = re.sub(r'<llm-code-output>.*?</llm-code-output>', '', trimmed_text, flags=re.DOTALL)
         
-        # Execute code
         result = execute_python_code(code_str)
         
-        # Only replace if execution was successful
         if result:
             boxed_match = re.search(r'\\boxed\{([^}]+)\}', trimmed_text)
             if boxed_match:
@@ -117,42 +107,15 @@ def post_process_solution_v0_v1_v2(generated_text):
     return trimmed_text
 
 def solve_math_problem_v3(model, tokenizer, question, max_length=512, action='test', temperature=0.8, top_p=0.9):
-    """
-    New iterative inference for v3 format with inline code execution.
-    """
     return solve_math_problem(model, tokenizer, question, SYSTEM_PROMPT_V3, max_length, action=action, temperature=temperature, top_p=top_p)
-def extract_answer(text):
-    if "\\boxed{" in text:
-        idx = text.rfind("\\boxed{")
-        content = ""
-        count = 0
-        started = False
-        for char in text[idx:]:
-            if char == "{":
-                count += 1
-                started = True
-                if count == 1: continue 
-            elif char == "}":
-                count -= 1
-            if started:
-                if count == 0: break
-                content += char
-        return content.strip()
-    
-    match = re.search(r'[Tt]he answer is[:\s]+(-?[\d,\.]+)', text)
-    if match:
-        return match.group(1)
-        
-    return None
 
 def evaluate(model_id=None, dataset_name="gsm8k", data_path=1, num_samples=-1):
     model, tokenizer = load_model(model_id, data_path)
-    model_id = model_id if model_id in ['sft', 'rl'] else "base"
+    model_id = model_id if model_id in ['sft', 'rl', 'grpo'] else "base"
     output_file = f"result_{model_id}_{dataset_name}_v{data_path}.json"
     
     if dataset_name == "gsm8k":
         ds = load_dataset("gsm8k", "main", split="test")
-        # get truth and remove commas (e.g. 128,000 -> 128000)
         get_truth = lambda x: x['answer'].split("####")[-1].strip().replace(',', '')
     elif dataset_name == "math":
         ds = load_dataset("nlile/hendrycks-MATH-benchmark", split="test")
@@ -175,17 +138,14 @@ def evaluate(model_id=None, dataset_name="gsm8k", data_path=1, num_samples=-1):
         question = item['question'] if dataset_name == 'gsm8k' else item['problem']
         ground_truth = get_truth(item)
         
-        # chọn inference theo data_path
         if data_path >= 3:
-            # sử dụng inference mới cho v3
             processed_solution = solve_math_problem_v3(model, tokenizer, question, max_length=512, action='test')
         else:
-            # sử dụng inference cũ cho v0/v1/v2
             if data_path == 0:
                 prompt = PROMPT_V0.format(question=question)
             elif data_path == 1:
                 prompt = PROMPT_V1.format(question=question)
-            else:  # data_path == 2
+            else:
                 prompt = PROMPT_V2.format(question=question)
             
             inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to("cuda")
@@ -202,7 +162,6 @@ def evaluate(model_id=None, dataset_name="gsm8k", data_path=1, num_samples=-1):
             generated_text = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
             processed_solution = post_process_solution_v0_v1_v2(generated_text)
         
-        # trích xuất đáp án và so sánh
         predicted_answer = extract_answer(processed_solution)
         correct = is_equiv(predicted_answer, ground_truth)
 
@@ -213,8 +172,8 @@ def evaluate(model_id=None, dataset_name="gsm8k", data_path=1, num_samples=-1):
             "truth": ground_truth,
             "correct": correct
         })
+        print(results[-1])
     
-    # tổng hợp và in kết quả
     correct_count = sum(1 for r in results if r['correct'])
     total_count = len(results)
     accuracy = correct_count / total_count if total_count > 0 else 0
