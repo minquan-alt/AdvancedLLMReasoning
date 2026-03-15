@@ -23,26 +23,26 @@ echo "=========================================="
 # echo -e "\n[y/10] Testing GRPO on MATH..."
 # python -m math_tutor_model.test --data math --model grpo --data_path 3
 
-echo -e "\n[4/10] Testing v2 on MATH..."
-python -m math_tutor_model.test --data math --model sft --data_path 2
+# echo -e "\n[4/10] Testing v2 on MATH..."
+# python -m math_tutor_model.test --data math --model sft --data_path 2
 
-echo -e "\n[5/10] Testing v1 on GSM8K..."
-python -m math_tutor_model.test --data gsm8k --model sft --data_path 1
+# echo -e "\n[5/10] Testing v1 on GSM8K..."
+# python -m math_tutor_model.test --data gsm8k --model sft --data_path 1
 
-echo -e "\n[6/10] Testing v1 on MATH..."
-python -m math_tutor_model.test --data math --model sft --data_path 1
+# echo -e "\n[6/10] Testing v1 on MATH..."
+# python -m math_tutor_model.test --data math --model sft --data_path 1
 
 # echo -e "\n[7/10] Testing v0 on GSM8K..."
 # python -m math_tutor_model.test --data gsm8k --model sft --data_path 0
 
-# echo -e "\n[8/10] Testing v0 on MATH..."
-# python -m math_tutor_model.test --data math --model sft --data_path 0
+echo -e "\n[8/10] Testing v0 on MATH..."
+python -m math_tutor_model.test --data math --model sft --data_path 0
 
-# echo -e "\n[9/10] Testing base model on GSM8K..."
-# python -m math_tutor_model.test --data gsm8k --model base --data_path 0
+echo -e "\n[9/10] Testing base model on GSM8K..."
+python -m math_tutor_model.test --data gsm8k --model base --data_path 0
 
-# echo -e "\n[10/10] Testing base model on MATH..."
-# python -m math_tutor_model.test --data math --model base --data_path 0
+echo -e "\n[10/10] Testing base model on MATH..."
+python -m math_tutor_model.test --data math --model base --data_path 0
 
 echo -e "\n=========================================="
 echo "All tests completed!"

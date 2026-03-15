@@ -3,14 +3,9 @@ PROMPT_V0 = """### Question:
 
 ### Solution:
 """
-
-PROMPT_V1 = """### Question:
+# v1 is the same as v0 but different masking
+PROMPT_V1 = """### Question: 
 {question}
-
-### Instruction:
-Solve the problem step by step. You can use Python code if needed.
-If you write code, wrap it inside <llm-code> ... </llm-code>.
-Output ONLY the final number inside \\boxed{{}}. Example: \\boxed{{42}}.
 
 ### Solution:
 """

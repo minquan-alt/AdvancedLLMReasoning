@@ -110,12 +110,19 @@ def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512
     input_ids = inputs["input_ids"]
     full_response = ""
     total_generated = 0  # Tổng số token đã sinh ra
+    max_iterations = 10  # Prevent infinite loops
 
-    while total_generated < max_length:
+    iteration = 0
+    while total_generated < max_length and iteration < max_iterations:
+        iteration += 1
         # Số token còn lại được phép sinh ra
         remaining_tokens = max_length - total_generated
         if remaining_tokens <= 0:
             break
+        
+        # Limit remaining tokens to prevent too long generation
+        remaining_tokens = min(remaining_tokens, 256)
+        
         with torch.no_grad():
             if action == 'test':
                 output_ids = model.generate(
@@ -154,10 +161,13 @@ def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512
 
         code_match = re.search(r'```python\s*\n(.*?)\n```', full_response, re.DOTALL)
 
-
         if code_match:
             code_str = code_match.group(1)
             code_output = execute_python_code(code_str)
+            
+            # If code execution failed or returned None, continue without injecting output
+            if code_output is None:
+                code_output = "Error executing code"
 
             result_text = (
                 "<llm>\n"
@@ -171,14 +181,19 @@ def solve_math_problem(model, tokenizer, question, system_prompt, max_length=512
                 add_special_tokens=False
             ).to(model.device)
 
-            max_result_tokens = 512
+            max_result_tokens = 256  # Reduced from 512
             if result_ids.shape[1] > max_result_tokens:
                 result_ids = result_ids[:, :max_result_tokens]
             input_ids = torch.cat([input_ids, result_ids], dim=1)
             full_response += result_text
             continue
 
+        # Check for end of text token
         if (output_ids[0, -1].item() == tokenizer.convert_tokens_to_ids("<|eot_id|>")):
+            break
+        
+        # If no code block found and no boxed answer, break to prevent infinite loop
+        if iteration > 5 and "```python" not in new_text and "\\boxed{" not in full_response:
             break
 
     return full_response
